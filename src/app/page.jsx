@@ -7,6 +7,9 @@ const CAT = { top:"Top Story", pol:"Politics", biz:"Business", tec:"Technology",
 
 export default async function Home() {
   const supabase = supabaseAdmin();
+  // Safe to display: this is the NEXT_PUBLIC_ url, not a secret. Showing it
+  // makes "pointed at the wrong Supabase project" obvious at a glance.
+  const host = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/^https?:\/\//, "") || "not set";
 
   if (!supabase) {
     return (
@@ -24,11 +27,33 @@ export default async function Home() {
     );
   }
 
-  const { data: stories } = await supabase
+  const { data: stories, error } = await supabase
     .from("stories")
     .select("id,title,url,source,category,snippet,published_at,attention")
     .order("attention", { ascending: false })
     .limit(20);
+
+  // A failed query returns data:null, which is indistinguishable from an empty
+  // table unless we look at `error`. Say which it is — a silent empty page sent
+  // us chasing the ingester when the real fault was upstream.
+  if (error) {
+    return (
+      <main className="wrap">
+        <h1>Can&apos;t read the stories table.</h1>
+        <p className="sub">
+          The app reached Supabase at <code>{host}</code> but the query failed.
+        </p>
+        <div className="setup">
+          <p><strong>{error.message}</strong>{error.code ? ` (${error.code})` : ""}</p>
+          <ol>
+            <li>Confirm that host is the PressPlay project — not Starcaster or Normie.</li>
+            <li>Confirm <code>supabase/schema.sql</code> has been run on it.</li>
+            <li>Check <code>SUPABASE_SERVICE_ROLE_KEY</code> for a truncated paste or a trailing comment.</li>
+          </ol>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="wrap">
@@ -51,7 +76,13 @@ export default async function Home() {
           </p>
         </article>
       ))}
-      {!stories?.length && <p>No stories yet — run <code>npm run ingest</code>.</p>}
+      {!stories?.length && (
+        <p>
+          The <code>stories</code> table on <code>{host}</code> is empty — run{" "}
+          <code>npm run ingest</code>. (The query itself succeeded, so the
+          connection and schema are fine.)
+        </p>
+      )}
     </main>
   );
 }
