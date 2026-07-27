@@ -1,0 +1,21 @@
+{
+  "name": "pressplay-today",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "ingest": "node scripts/ingest.mjs",
+    "ingest:dry": "node scripts/ingest.mjs --dry",
+    "ingest:local": "node scripts/ingest.mjs --local"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rss-parser": "^3.13.0"
+  }
+}

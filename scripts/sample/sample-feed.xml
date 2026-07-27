@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>Sample Wire</title>
+  <link>https://example.com</link>
+  <description>Offline test fixture for the PressPlay ingester</description>
+  <item>
+    <title>City council approves $210M transit expansion after marathon session</title>
+    <link>https://example.com/transit-expansion</link>
+    <guid>https://example.com/transit-expansion</guid>
+    <pubDate>Sun, 26 Jul 2026 21:22:21 GMT</pubDate>
+    <description>&lt;p&gt;After a six-hour session and more than sixty public comments, the council voted 7&#8211;2 to approve the largest transit package in city history, funding three rapid-bus corridors &amp;amp; a light-rail extension.&lt;/p&gt;</description>
+  </item>
+  <item>
+    <title>Chipmaker posts record quarter as AI demand surges</title>
+    <link>https://example.com/chipmaker-quarter</link>
+    <guid>https://example.com/chipmaker-quarter</guid>
+    <pubDate>Sun, 26 Jul 2026 18:22:21 GMT</pubDate>
+    <description>Data-center orders drove revenue up 42% year over year, and the company raised its full-year outlook for the second time this year, citing sustained AI infrastructure buildout across every region it serves worldwide, with analysts noting the growth streak now spans six consecutive quarters.</description>
+  </item>
+  <item>
+    <title>Stale story that should be filtered out</title>
+    <link>https://example.com/stale</link>
+    <guid>https://example.com/stale</guid>
+    <pubDate>Wed, 22 Jul 2026 23:22:21 GMT</pubDate>
+    <description>This item is older than 48 hours and must not appear in results.</description>
+  </item>
+  <item>
+    <title></title>
+    <link>https://example.com/no-title</link>
+    <description>Missing title — should be skipped.</description>
+  </item>
+</channel>
+</rss>

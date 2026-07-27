@@ -1,0 +1,15 @@
+{
+  "_note": "Starter feed list. Verify each publisher's RSS terms of use before production. Add/remove freely — the ingester reads this file. Category ids: top, pol, biz, tec, spt, ent, sci, loc, str",
+  "feeds": [
+    { "name": "NPR Top Stories",      "url": "https://feeds.npr.org/1001/rss.xml",                              "category": "top" },
+    { "name": "BBC News",             "url": "https://feeds.bbci.co.uk/news/rss.xml",                           "category": "top" },
+    { "name": "NYT Home Page",        "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",       "category": "top" },
+    { "name": "MarketWatch Top",      "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",      "category": "biz" },
+    { "name": "The Verge",            "url": "https://www.theverge.com/rss/index.xml",                          "category": "tec" },
+    { "name": "Ars Technica",         "url": "https://feeds.arstechnica.com/arstechnica/index",                 "category": "tec" },
+    { "name": "ESPN News",            "url": "https://www.espn.com/espn/rss/news",                              "category": "spt" },
+    { "name": "Variety",              "url": "https://variety.com/feed/",                                       "category": "ent" },
+    { "name": "ScienceDaily",         "url": "https://www.sciencedaily.com/rss/all.xml",                        "category": "sci" },
+    { "name": "The Denver Post",      "url": "https://www.denverpost.com/feed/",                                "category": "loc" }
+  ]
+}

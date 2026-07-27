@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# build output
+.next/
+out/
+build/
+
+# secrets — never commit a real key
+.env
+.env.local
+.env.*.local
+
+# hosting
+.vercel
+
+# logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
