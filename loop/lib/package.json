@@ -1,0 +1,4 @@
+{
+  "//": "The moved StarCaster modules are CommonJS, as they are in StarCaster (CLAUDE.md engineering rule 3: move, don't rewrite). The root package.json says \"type\": \"module\", which would otherwise make every .js file here ESM and break their require() calls. This marker scopes CommonJS to lib/ without renaming a single file. projectConfig.mjs stays ESM — the .mjs extension always wins.",
+  "type": "commonjs"
+}

@@ -6,10 +6,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "verify": "npm run build && npm run test:loop",
     "start": "next start",
     "ingest": "node --env-file-if-exists=.env.local scripts/ingest.mjs",
     "ingest:dry": "node --env-file-if-exists=.env.local scripts/ingest.mjs --dry",
-    "ingest:local": "node --env-file-if-exists=.env.local scripts/ingest.mjs --local"
+    "ingest:local": "node --env-file-if-exists=.env.local scripts/ingest.mjs --local",
+    "clickup": "node loop/scripts/with_doppler.mjs node loop/scripts/clickup.mjs",
+    "doctor": "node loop/scripts/doctor.mjs",
+    "test:loop": "node --test \"loop/**/*.test.js\" \"loop/**/*.test.mjs\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

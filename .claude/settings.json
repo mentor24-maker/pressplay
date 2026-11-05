@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/block_edits_on_main.cjs\"",
+            "timeout": 15,
+            "statusMessage": "Checking branch (no edits on main)"
+          }
+        ]
+      }
+    ]
+  }
+}

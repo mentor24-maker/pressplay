@@ -1,6 +1,9 @@
 # dependencies
 node_modules/
 
+# the loop's per-ticket git worktrees
+.claude/worktrees/
+
 # build output
 .next/
 out/
