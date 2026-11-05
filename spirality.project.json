@@ -1,0 +1,34 @@
+{
+  "workspaceId": "0",
+  "spaceId": "0",
+  "loopQueueListId": "0",
+  "operatorUserId": "1",
+  "machineUserId": "13",
+  "githubRepo": "mentor24-maker/pressplay",
+  "dopplerProject": "pressplay",
+  "dopplerConfig": "dev",
+  "launchdPrefix": "com.pressplay",
+  "logDir": "~/loop-logs",
+  "mergePhrases": [
+    "merge",
+    "merge it",
+    "ship it",
+    "approve"
+  ],
+  "governancePaths": [
+    "CLAUDE.md",
+    "docs/LOOP_ENGINEERING.md",
+    ".claude/skills/",
+    ".claude/settings.json",
+    ".github/workflows/"
+  ],
+  "autoMergeLanes": [],
+  "operatorName": "Dane",
+  "productSlug": "pressplay",
+  "legacyMachinePrefixes": [],
+  "productScripts": {},
+  "trackerPrefix": "PP",
+  "tracker": "api",
+  "trackerUrl": "http://mac-mini.local:4180",
+  "trackerApiUrl": "http://127.0.0.1:4180"
+}

@@ -1,0 +1,24 @@
+name: verify
+
+# Written by Spirality's setup wizard (scripts/onboard/copy.mjs). One job,
+# named verify: the check main is protected by, and the one the loops run.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: The product's check
+        run: npm run build
+      - name: The loop's copied tests
+        run: npm run test:loop
