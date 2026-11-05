@@ -194,7 +194,7 @@ Exit **0** nothing of his / **3** something IS his / **1** could not tell.
    side blind.
 
    ```bash
-   npm run build
+   npm run verify
    ```
 
    `verify` is the ONE name for the gates; CI runs the same script. If your

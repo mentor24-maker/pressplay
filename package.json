@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "verify": "npm run build && npm run test:loop",
     "start": "next start",
     "ingest": "node --env-file-if-exists=.env.local scripts/ingest.mjs",
     "ingest:dry": "node --env-file-if-exists=.env.local scripts/ingest.mjs --dry",

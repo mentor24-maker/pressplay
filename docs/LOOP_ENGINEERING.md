@@ -20,7 +20,7 @@ have the history. A change to how the loop works is made in Spirality first.
 |---|---|---|---|
 | 1 | `loop-spec` | a session, with Dane | interviews him, files small tasks with acceptance criteria and test steps |
 | 1 | `loop-intake` | a loop | takes the oldest request he filed from the tracker page (`Requested`), writes it up in `loop-spec`'s shape with his words kept verbatim, slices it if it is more than one PR, and hands each ticket to him (`Needs your input`); his "go" queues it |
-| 2 | `loop-build` | a loop | claims the next task, builds it in its own worktree, passes `npm run build`, opens a PR, hands it to review |
+| 2 | `loop-build` | a loop | claims the next task, builds it in its own worktree, passes `npm run verify`, opens a PR, hands it to review |
 | 3 | `loop-review` | a loop | independently re-verifies the PR, then hands it to Dane (`Ready to launch`) or back to build (`Rework`) |
 
 The skills live in `.claude/skills/`; Claude Code discovers them nowhere else.
@@ -198,12 +198,12 @@ Your day:
 
 ### What the `verify` gate is
 
-`npm run build` is the definition of done. CI's `verify` check runs it on
-every pull request, then the copied loop tests (`npm run test:loop`), and
-`main` cannot merge without it green. The build loop runs it before opening
+`npm run verify` is the definition of done: the Next.js build (`npm run build`),
+then the copied loop tests (`npm run test:loop`). CI's `verify` check runs it on
+every pull request, and `main` cannot merge without it green. The build loop runs it before opening
 a PR; the review loop runs it again.
 
-A new kind of check is added to `npm run build`, and every lane inherits
+A new kind of check is added to `verify` in `package.json`, and every lane inherits
 it at once.
 
 ### Safety — why this is wired the way it is

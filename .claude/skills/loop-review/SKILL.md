@@ -1,6 +1,6 @@
 ---
 name: loop-review
-description: Pick the next "In review" task from the PressPlay queue in the tracker, independently verify its pull request (`npm run build` + code review + a real test pass), then either mark it "Ready to launch" and ping Dane to merge, or send it back to "Rework" with notes. Designed to be run on a timer with `/loop 30m loop-review`. Never merges on its own.
+description: Pick the next "In review" task from the PressPlay queue in the tracker, independently verify its pull request (`npm run verify` + code review + a real test pass), then either mark it "Ready to launch" and ping Dane to merge, or send it back to "Rework" with notes. Designed to be run on a timer with `/loop 30m loop-review`. Never merges on its own.
 ---
 
 # Loop: Review
@@ -112,7 +112,7 @@ look at; this is a check that runs in CI"*).
    the merge goes in cleanly after all, the note is out of date; carry on.
 
 3. **Verify independently — do not trust the build loop's word.**
-   - Re-run the gates: `npm run build`.
+   - Re-run the gates: `npm run verify`.
    - Run `/code-review` on the branch diff for correctness and quality.
    - **Actually exercise it.** Open the affected screen and walk the task's
      "How to test" steps. A green test suite is not proof the feature works.
