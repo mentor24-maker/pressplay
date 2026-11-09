@@ -49,9 +49,14 @@ name, timestamp, and link** → drop items older than 48h → compute an attenti
 score (v1: recency decay, half-life ~8h) → upsert on `guid` so re-runs never
 duplicate. Feed failures are per-feed and non-fatal.
 
-**Copyright posture (do not weaken):** never store or display full article
-text or images. Always attribute and link out. Verify each publisher's RSS
-terms before production use; replace or remove any feed on request.
+**Copyright posture (do not weaken):** never display or publish full article
+text or images: the site, the public API and games shown to players carry only
+headline, snippet, facts, attribution and the link out. Full article text is
+stored **privately** (the `story_bodies` table, server-only, kept 30 days) and
+only for outlets that have said yes: each feed's `fullCopy.allowed` in
+`data/feeds.json`, off by default. Never get around a paywall, a login or
+robots.txt. Verify each publisher's RSS terms before production use; replace
+or remove any feed on request.
 
 ## Attention score v2 ideas
 

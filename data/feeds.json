@@ -1,15 +1,16 @@
 {
   "_note": "Starter feed list. Verify each publisher's RSS terms of use before production. Add/remove freely — the ingester reads this file. Category ids: top, pol, biz, tec, spt, ent, sci, loc, str",
+  "_fullCopy": "fullCopy.allowed: turn on ONLY once that outlet has said yes to us storing its full articles privately (off when missing). method: \"feed\" reads the full text the feed itself carries; \"page\" fetches the article page, only where its robots.txt allows. See src/lib/fullCopy.js.",
   "feeds": [
-    { "name": "NPR Top Stories",      "url": "https://feeds.npr.org/1001/rss.xml",                              "category": "top" },
-    { "name": "BBC News",             "url": "https://feeds.bbci.co.uk/news/rss.xml",                           "category": "top" },
-    { "name": "NYT Home Page",        "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",       "category": "top" },
-    { "name": "MarketWatch Top",      "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",      "category": "biz" },
-    { "name": "The Verge",            "url": "https://www.theverge.com/rss/index.xml",                          "category": "tec" },
-    { "name": "Ars Technica",         "url": "https://feeds.arstechnica.com/arstechnica/index",                 "category": "tec" },
-    { "name": "ESPN News",            "url": "https://www.espn.com/espn/rss/news",                              "category": "spt" },
-    { "name": "Variety",              "url": "https://variety.com/feed/",                                       "category": "ent" },
-    { "name": "ScienceDaily",         "url": "https://www.sciencedaily.com/rss/all.xml",                        "category": "sci" },
-    { "name": "The Denver Post",      "url": "https://www.denverpost.com/feed/",                                "category": "loc" }
+    { "name": "NPR Top Stories",      "url": "https://feeds.npr.org/1001/rss.xml",                              "category": "top", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "BBC News",             "url": "https://feeds.bbci.co.uk/news/rss.xml",                           "category": "top", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "NYT Home Page",        "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",       "category": "top", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "MarketWatch Top",      "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",      "category": "biz", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "The Verge",            "url": "https://www.theverge.com/rss/index.xml",                          "category": "tec", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "Ars Technica",         "url": "https://feeds.arstechnica.com/arstechnica/index",                 "category": "tec", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "ESPN News",            "url": "https://www.espn.com/espn/rss/news",                              "category": "spt", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "Variety",              "url": "https://variety.com/feed/",                                       "category": "ent", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "ScienceDaily",         "url": "https://www.sciencedaily.com/rss/all.xml",                        "category": "sci", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "The Denver Post",      "url": "https://www.denverpost.com/feed/",                                "category": "loc", "fullCopy": { "allowed": false, "method": "page" } }
   ]
 }

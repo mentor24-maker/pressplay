@@ -1,7 +1,7 @@
 # PressPlay Today: what is built so far
 
 *Written 8 November 2026, checked line by line against the code on `main` at
-that date. If the code changes, this document can go out of date; the code is
+that date. Updated 9 November 2026 for the private full-copy store (PP-3). If the code changes, this document can go out of date; the code is
 always the final word.*
 
 PressPlay Today ("Where the News Becomes a Game") is meant to turn the day's
@@ -58,9 +58,11 @@ logic is in `src/lib/ingest.js`. For every feed, at the same time:
 3. **Skip** an item that has no headline or no link, or whose date is
    unreadable.
 4. **Drop anything older than 48 hours.**
-5. **Keep only five things**: the headline, a snippet of at most 280
-   characters (cut at a word, ending in "…"), the source's name, the
-   publication time, and the link. Plus the feed's category.
+5. **Keep only five things in public**: the headline, a snippet of at most
+   280 characters (cut at a word, ending in "…"), the source's name, the
+   publication time, and the link. Plus the feed's category. (Full article
+   text, only for outlets that allow it, goes somewhere private: see
+   "Full copy, kept private" below.)
 6. **Score it.** Each story gets an **attention score** from 0 to 100. Today
    this is purely about freshness: a brand-new story scores 100 and the score
    halves roughly every 8.3 hours (about 37 at 12 hours old, about 2 at 48).
@@ -75,6 +77,31 @@ logic is in `src/lib/ingest.js`. For every feed, at the same time:
 
 If one feed fails (site down, bad data), the others carry on; the failure is
 reported as a "non-fatal" error rather than stopping the run.
+
+### Full copy, kept private
+
+Since PP-3 (9 November 2026), PressPlay can also keep the **full text** of a
+story, to build neutral fact lists from all sources later. It is never shown
+anywhere. The rules, in `src/lib/fullCopy.js`:
+
+- **Only for outlets that said yes.** Each feed in `data/feeds.json` has a
+  `fullCopy` setting. `allowed` is **off** for all ten feeds today; it is
+  turned on for an outlet once that outlet agrees.
+- **Two ways to get it**, chosen per feed by `method`: `"feed"` reads the full
+  text the feed itself carries (some publishers offer a full-text feed);
+  `"page"` opens the article page and keeps its paragraphs, but only if the
+  site's **robots.txt** (a file where a site says which pages automatic
+  readers may open) allows our reader, and at most 15 pages per feed per run.
+  If robots.txt cannot be read, the page is not opened. No paywall or login is
+  ever got around.
+- **Stored privately** in the `story_bodies` table (below), never in the
+  public `stories` table. Text shorter than 200 characters is a teaser, not
+  the article, and is not stored.
+- **Never in a log.** Errors name the feed and the link, never the text; the
+  run reports only counts ("Full copy: off for all 10 feeds").
+- **Kept 30 days**, then deleted on the next run.
+
+A dry run never opens an article page and stores nothing.
 
 ### Three ways to run it by hand
 
@@ -119,15 +146,18 @@ columns).
 | `plays` | One row each time a player plays a game: their answer, whether it was right, the points earned. A player can play each game only once. | No. |
 | `predictions` | "What happens next?" questions tied to a story, with the options, when it resolves, and (later) the outcome. | No. |
 | `prediction_picks` | Each player's pick on a prediction, and the points awarded. One pick per player per prediction. | No. |
+| `story_bodies` | **Private.** The full text of a story, from outlets that allow it: how it was fetched (`feed` or `page`), the outlet, and when. Deleted after 30 days, and with its story. | Written by ingestion only for feeds with full copy on (none yet). |
 
-(The ticket for this overview listed five tables; the schema actually has six.
-`prediction_picks` is the sixth.)
+(The ticket for this overview listed five tables; the schema had six, with
+`prediction_picks` the sixth. `story_bodies` made seven on 9 November 2026.)
 
 **Row Level Security** (database rules about who may read or change which
 rows) is switched on for every table: anyone may read stories, published
 games and predictions; a player may see and update their own profile, and
-see and add their own plays and picks. The server's own master key (below) skips these rules, which is how
-ingestion writes stories.
+see and add their own plays and picks. `story_bodies` has **no** rule letting
+anyone read it, and the public and signed-in keys are refused access to it
+outright, so only the server can read full copy. The server's own master key
+(below) skips these rules, which is how ingestion writes stories.
 
 ---
 
@@ -215,7 +245,8 @@ once broke the master key.
 ### The "done" check
 
 `npm run build` builds the whole site and fails if anything is broken.
-`npm run verify` runs that build and then the work loop's own tests; it is the
+`npm run verify` runs that build, then the app's own tests (`npm run
+test:app`, the `*.test.mjs` files in `src/`), then the work loop's own tests; it is the
 check GitHub runs on every pull request (a **pull request** is a proposed
 change, reviewed before it joins `main`, the live copy of the code).
 
@@ -223,16 +254,26 @@ change, reviewed before it joins `main`, the live copy of the code).
 
 ## 6. The copyright rule
 
-PressPlay stores and shows **only the headline, a short snippet (at most 280
-characters), the source's name, the publication time, and a link to the
-original**. Never the full article and never images. Every story is credited
-and links out to its publisher. Games are to be built from facts in the
-story, always credited and linked. The rule is written in three places: the
-database design (`supabase/schema.sql`) states it in its opening comment, and
-two of them carry a warning marker, the README ("do not weaken") and the
-ingestion code (`src/lib/ingest.js`, "do not change casually"). The README
-adds: check each publisher's RSS terms before going live, and remove any feed
-a publisher asks to be removed.
+The rule changed on 9 November 2026 (PP-3), on Dane's decision, because
+PressPlay is being built for the news outlets that own the stories.
+
+- **Published** (the site, the public API, games shown to players): **only
+  the headline, a short snippet (at most 280 characters), the facts, the
+  source's name, the publication time, and a link to the original.** Never
+  the full article and never images. Every story is credited and links out to
+  its publisher.
+- **Stored privately:** full article text, only from outlets that have said
+  yes, in the server-only `story_bodies` table, for 30 days (see "Full copy,
+  kept private" in section 1).
+
+Games are to be built from facts in the story, always credited and linked.
+The rule is written in four places: the database design
+(`supabase/schema.sql`) states it in its opening comment, and three carry a
+warning marker, the README ("do not weaken"), the ingestion code
+(`src/lib/ingest.js`, "do not change casually") and the full-copy code
+(`src/lib/fullCopy.js`, "do not weaken casually"). The README adds: check
+each publisher's RSS terms before going live, and remove any feed a publisher
+asks to be removed.
 
 ---
 
