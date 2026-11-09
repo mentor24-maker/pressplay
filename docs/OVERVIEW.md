@@ -125,8 +125,8 @@ columns).
 
 **Row Level Security** (database rules about who may read or change which
 rows) is switched on for every table: anyone may read stories, published
-games and predictions; a player may only see and add their own profile, plays
-and picks. The server's own master key (below) skips these rules, which is how
+games and predictions; a player may see and update their own profile, and
+see and add their own plays and picks. The server's own master key (below) skips these rules, which is how
 ingestion writes stories.
 
 ---
@@ -227,9 +227,10 @@ PressPlay stores and shows **only the headline, a short snippet (at most 280
 characters), the source's name, the publication time, and a link to the
 original**. Never the full article and never images. Every story is credited
 and links out to its publisher. Games are to be built from facts in the
-story, always credited and linked. The rule is written into the ingestion code
-(`src/lib/ingest.js`), the database design (`supabase/schema.sql`) and the
-README, each marked "do not weaken" or "do not change casually". The README
+story, always credited and linked. The rule is written in three places: the
+database design (`supabase/schema.sql`) states it in its opening comment, and
+two of them carry a warning marker, the README ("do not weaken") and the
+ingestion code (`src/lib/ingest.js`, "do not change casually"). The README
 adds: check each publisher's RSS terms before going live, and remove any feed
 a publisher asks to be removed.
 

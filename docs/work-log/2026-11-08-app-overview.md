@@ -12,3 +12,8 @@ That turned up a few things worth knowing. The database has six tables, not
 five. The offline test, `npm run ingest:local`, now finds no stories because
 its sample news is too old. These are written down in the overview as
 observations, not fixed, so each can become its own ticket.
+
+After review, two sentences were corrected to match the database rules
+exactly: a player can see and update their own profile (not add one), and
+only two of the three places that state the copyright rule carry a
+"do not weaken" style warning.
