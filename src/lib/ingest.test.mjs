@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ingestAll, normalizeItem, GUID_BATCH } from "./ingest.js";
+import { MAX_PAGES_PER_FEED, MAX_PAGE_ATTEMPTS_PER_FEED } from "./fullCopy.js";
 
 const NOW = Date.parse("2026-11-09T18:00:00Z");
 const LONG = "The council voted seven to two on Tuesday night. ".repeat(20).trim();
@@ -136,4 +137,87 @@ test("the stored-already lookup goes in batches", async () => {
   await ingestAll([feed], sb, { parseFeed: async () => many, fetchImpl: noFetch, now: NOW });
   const reads = sb.calls.filter((c) => c.op === "select").map((c) => c.vals.length);
   assert.deepEqual(reads, [GUID_BATCH, 5]);
+});
+
+const pageHtml = (n) => `<article><p>${LONG}</p><p>Page ${n}.</p></article>`;
+const okRobots = { ok: true, status: 200, text: async () => "User-agent: *\nAllow: /" };
+const pageFeed = (name) => ({ name, url: name, category: "top", fullCopy: { allowed: true, method: "page" } });
+const items = (prefix, n, host = "news.example") => Array.from({ length: n }, (_, i) => ({
+  title: `${prefix}${i}`, link: `https://${host}/${prefix}${i}`, guid: `${prefix}${i}`,
+  isoDate: new Date(NOW - 60e3).toISOString(), contentSnippet: "teaser",
+}));
+
+test("a feed-method outlet with only a teaser (no content:encoded) stores nothing", async () => {
+  const sb = fakeSupabase();
+  // rss-parser puts <description> in `content`; a long teaser there must not pass as full copy.
+  const teaserOnly = { items: [{ title: "T", link: "https://n.example/t", guid: "t", isoDate: new Date(NOW).toISOString(), content: LONG, contentSnippet: LONG }] };
+  const feed = { name: "Partner", url: "u", category: "top", fullCopy: { allowed: true, method: "feed" } };
+  const res = await ingestAll([feed], sb, { parseFeed: async () => teaserOnly, fetchImpl: noFetch, now: NOW });
+  assert.equal(res.fullCopy.stored, 0);
+  assert.equal(sb.calls.some((c) => c.table === "story_bodies" && c.op === "upsert"), false);
+  assert.match(res.errors[0], /too short/);
+});
+
+test("failing links do not use up the stored-page budget, and a repeated guid is fetched once", async () => {
+  const sb = fakeSupabase();
+  const feedItems = [...items("bad", MAX_PAGES_PER_FEED), ...items("good", 3)];
+  feedItems.push({ ...feedItems[MAX_PAGES_PER_FEED] }); // good0 listed twice
+  const fetched = [];
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/robots.txt")) return okRobots;
+    fetched.push(url);
+    return url.includes("/bad") ? { ok: false, status: 500 } : { ok: true, status: 200, text: async () => pageHtml(url) };
+  };
+  const res = await ingestAll([pageFeed("Partner")], sb, { parseFeed: async () => ({ items: feedItems }), fetchImpl, now: NOW });
+  const up = sb.calls.find((c) => c.table === "story_bodies" && c.op === "upsert");
+  assert.deepEqual(up.rows.map((r) => r.story_guid), ["good0", "good1", "good2"], "stories behind the failing links are still stored");
+  assert.equal(fetched.filter((u) => u.endsWith("/good0")).length, 1, "a repeated guid is fetched once");
+  assert.equal(res.fullCopy.stored, 3);
+});
+
+test("page requests per feed stop at MAX_PAGE_ATTEMPTS_PER_FEED; robots refusals do not count", async () => {
+  const sb = fakeSupabase();
+  const feedItems = [...items("private", 10), ...items("bad", MAX_PAGE_ATTEMPTS_PER_FEED + 10)];
+  let pageRequests = 0;
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/robots.txt")) return { ok: true, status: 200, text: async () => "User-agent: *\nDisallow: /private" };
+    pageRequests++;
+    return { ok: false, status: 503 };
+  };
+  await ingestAll([pageFeed("Partner")], sb, { parseFeed: async () => ({ items: feedItems }), fetchImpl, now: NOW });
+  assert.equal(pageRequests, MAX_PAGE_ATTEMPTS_PER_FEED);
+});
+
+test("each feed's full copy is written as soon as that feed is done, not after every feed", async () => {
+  const sb = fakeSupabase();
+  let releaseSlow;
+  const slowGate = new Promise((r) => { releaseSlow = r; });
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/robots.txt")) return okRobots;
+    if (url.includes("slow.example")) await slowGate;
+    return { ok: true, status: 200, text: async () => pageHtml(url) };
+  };
+  const parseFeed = async (u) => ({ items: u === "Fast" ? items("f", 2, "fast.example") : items("s", 2, "slow.example") });
+  const run = ingestAll([pageFeed("Slow"), pageFeed("Fast")], sb, { parseFeed, fetchImpl, now: NOW });
+
+  // Wait until the fast feed's rows land while the slow feed is still stuck.
+  for (let i = 0; i < 50 && !sb.calls.some((c) => c.table === "story_bodies" && c.op === "upsert"); i++) await new Promise((r) => setTimeout(r, 5));
+  const early = sb.calls.filter((c) => c.table === "story_bodies" && c.op === "upsert");
+  assert.equal(early.length, 1, "the fast feed is saved before the slow one finishes");
+  assert.deepEqual(early[0].rows.map((r) => r.source), ["Fast", "Fast"]);
+
+  releaseSlow();
+  const res = await run;
+  assert.equal(sb.calls.filter((c) => c.table === "story_bodies" && c.op === "upsert").length, 2);
+  assert.equal(res.fullCopy.stored, 4);
+});
+
+test("two feeds carrying the same story do not break the stories write", async () => {
+  const sb = fakeSupabase();
+  const a = { name: "A", url: "a", category: "top" };
+  const b = { name: "B", url: "b", category: "top" };
+  const res = await ingestAll([a, b], sb, { parseFeed: async () => parsedFeed(), fetchImpl: noFetch, now: NOW });
+  const up = sb.calls.find((c) => c.table === "stories");
+  assert.deepEqual(up.rows.map((r) => r.guid), ["g1", "g2"]);
+  assert.equal(res.written, 2);
 });

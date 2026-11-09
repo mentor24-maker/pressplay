@@ -28,3 +28,15 @@ forwards to another website (a paywall, say) is never opened. The 30-day
 clean-up now runs first, so a slow run that hits the time limit still deletes
 old text. And the run report now says plainly when a step failed, instead of
 showing a zero as if all was well. Five more tests cover these.
+
+**Second send-back (same day):** three more fixes. An outlet set to send its
+full text in the feed now only counts the feed's real full-text field: before,
+a feed that carried only a teaser could have its teaser saved as if it were the
+whole article, and never replaced. Links that fail no longer use up an outlet's
+15 pages a run, so a handful of broken links cannot stop every newer story
+from being saved; a separate limit of 25 page requests keeps each run short,
+and a story listed twice is fetched once. And each outlet's text is now saved
+the moment that outlet is done, with outlets fetched side by side, so a run
+stopped by the one-minute time limit keeps what it already fetched. While
+there, two feeds carrying the same story no longer make the whole save of
+headlines fail. Five more tests (26 in total).

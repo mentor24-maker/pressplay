@@ -14,7 +14,7 @@ import Parser from "rss-parser";
 import { cleanText } from "./text.js";
 import {
   fullCopyPolicy, bodyFromFeedItem, fetchPageBody, retentionCutoff,
-  MAX_PAGES_PER_FEED, MIN_BODY_CHARS, USER_AGENT,
+  MAX_PAGES_PER_FEED, MAX_PAGE_ATTEMPTS_PER_FEED, MIN_BODY_CHARS, USER_AGENT,
 } from "./fullCopy.js";
 
 const parser = new Parser({
@@ -113,25 +113,32 @@ export async function ingestXml(xml, feed, now = Date.now()) {
 }
 
 /**
- * Turn candidates into private `story_bodies` rows: skip stories already
- * stored, read the text a full-text feed carries, fetch pages (robots.txt
- * honoured, at most MAX_PAGES_PER_FEED per feed per run). Errors name the
- * feed and the link, never the text.
+ * Turn one feed's candidates into private `story_bodies` rows: skip stories
+ * already stored and guids seen twice, read the text a full-text feed
+ * carries, fetch pages (robots.txt honoured). Per feed per run, at most
+ * MAX_PAGES_PER_FEED pages are stored and at most MAX_PAGE_ATTEMPTS_PER_FEED
+ * page requests are sent, so links that keep failing cannot block the
+ * stories behind them. Errors name the feed and the link, never the text.
  */
-export async function resolveBodies(candidates, { already = new Set(), fetchImpl = fetch, now = Date.now() } = {}) {
+export async function resolveBodies(candidates, { already = new Set(), fetchImpl = fetch, now = Date.now(), robotsCache = new Map() } = {}) {
   const rows = [];
   const errors = [];
-  const pagesBySource = new Map();
-  const robotsCache = new Map();
+  const seen = new Set(already);
+  const storedBySource = new Map();
+  const requestsBySource = new Map();
   const fetchedAt = new Date(now).toISOString();
   for (const c of candidates) {
-    if (already.has(c.story_guid)) continue;
+    if (seen.has(c.story_guid)) continue;
+    seen.add(c.story_guid);
     let text = c.text;
     if (c.method === "page") {
-      const used = pagesBySource.get(c.source) || 0;
-      if (used >= MAX_PAGES_PER_FEED) continue; // the rest wait for the next run
-      pagesBySource.set(c.source, used + 1);
-      const got = await fetchPageBody(c.url, { fetchImpl, robotsCache });
+      const requests = requestsBySource.get(c.source) || 0;
+      if ((storedBySource.get(c.source) || 0) >= MAX_PAGES_PER_FEED || requests >= MAX_PAGE_ATTEMPTS_PER_FEED) continue; // the rest wait for the next run
+      // Count page requests (each redirect hop is one); robots.txt reads are cached per site and not counted.
+      let sent = 0;
+      const counting = (url, opts) => { if (!String(url).endsWith("/robots.txt")) sent++; return fetchImpl(url, opts); };
+      const got = await fetchPageBody(c.url, { fetchImpl: counting, robotsCache });
+      requestsBySource.set(c.source, requests + sent);
       if (got.error) { errors.push(`${c.source}: full copy for ${c.url}: ${got.error}`); continue; }
       text = got.text;
     }
@@ -139,9 +146,16 @@ export async function resolveBodies(candidates, { already = new Set(), fetchImpl
       errors.push(`${c.source}: full copy for ${c.url}: too short to be the full article, not stored`);
       continue;
     }
+    storedBySource.set(c.source, (storedBySource.get(c.source) || 0) + 1);
     rows.push({ story_guid: c.story_guid, body: text, method: c.method, source: c.source, fetched_at: fetchedAt });
   }
   return { rows, errors };
+}
+
+/** The first row for each guid: two feeds carrying one story would make the whole upsert fail. */
+function uniqueByGuid(rows) {
+  const seen = new Set();
+  return rows.filter((r) => (seen.has(r.guid) ? false : (seen.add(r.guid), true)));
 }
 
 /**
@@ -153,7 +167,7 @@ export async function resolveBodies(candidates, { already = new Set(), fetchImpl
  */
 export async function ingestAll(feeds, supabase = null, { parseFeed, fetchImpl = fetch, now = Date.now() } = {}) {
   const results = await Promise.all(feeds.map((f) => ingestFeed(f, { parseFeed, now })));
-  const rows = results.flatMap((r) => r.stories);
+  const rows = uniqueByGuid(results.flatMap((r) => r.stories));
   const candidates = results.flatMap((r) => r.candidates);
   const errors = results.filter((r) => r.error).map((r) => `${r.feed}: ${r.error}`);
 
@@ -185,7 +199,7 @@ export async function ingestAll(feeds, supabase = null, { parseFeed, fetchImpl =
   if (candidates.length && storiesSaved) {
     const already = new Set();
     let readOk = true;
-    const guids = candidates.map((c) => c.story_guid);
+    const guids = [...new Set(candidates.map((c) => c.story_guid))];
     for (let i = 0; i < guids.length; i += GUID_BATCH) {
       const { data, error } = await supabase.from("story_bodies").select("story_guid").in("story_guid", guids.slice(i, i + GUID_BATCH));
       if (error) { errors.push(`supabase (story_bodies read): ${error.message}`); readOk = false; break; }
@@ -193,15 +207,25 @@ export async function ingestAll(feeds, supabase = null, { parseFeed, fetchImpl =
     }
     if (!readOk) fullCopy.failed.push("read");
     else {
-      const resolved = await resolveBodies(candidates, { already, fetchImpl, now });
-      errors.push(...resolved.errors);
-      if (resolved.rows.length) {
+      // Each feed is a different outlet, so feeds fetch side by side (one
+      // page at a time within a feed), and each feed's rows are written the
+      // moment that feed is done: a run cut short by the time limit keeps
+      // what it already fetched instead of losing it all.
+      const bySource = new Map();
+      for (const c of candidates) bySource.set(c.source, [...(bySource.get(c.source) || []), c]);
+      const robotsCache = new Map();
+      let writeFailed = false;
+      await Promise.all([...bySource.values()].map(async (group) => {
+        const resolved = await resolveBodies(group, { already, fetchImpl, now, robotsCache });
+        errors.push(...resolved.errors);
+        if (!resolved.rows.length) return;
         const up = await supabase
           .from("story_bodies")
           .upsert(resolved.rows, { onConflict: "story_guid", ignoreDuplicates: true, count: "exact" });
-        if (up.error) { errors.push(`supabase (story_bodies write): ${up.error.message}`); fullCopy.failed.push("write"); }
-        else fullCopy.stored = up.count ?? resolved.rows.length;
-      }
+        if (up.error) { errors.push(`supabase (story_bodies write, ${group[0].source}): ${up.error.message}`); writeFailed = true; }
+        else fullCopy.stored += up.count ?? resolved.rows.length;
+      }));
+      if (writeFailed) fullCopy.failed.push("write");
     }
   }
 

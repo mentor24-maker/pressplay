@@ -27,6 +27,7 @@ test("feed text keeps paragraphs and drops scripts", () => {
   assert.equal(htmlToText(html), "First & one.\n\nSecond\n\nline");
   assert.equal(bodyFromFeedItem({ "content:encoded": "<p>A</p><p>B</p>" }), "A\n\nB");
   assert.equal(bodyFromFeedItem({}), "");
+  assert.equal(bodyFromFeedItem({ content: "<p>Teaser from description</p>" }), "", "content is the teaser, never full copy");
 });
 
 test("page text comes from <article> paragraphs only", () => {

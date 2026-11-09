@@ -88,10 +88,15 @@ anywhere. The rules, in `src/lib/fullCopy.js`:
   `fullCopy` setting. `allowed` is **off** for all ten feeds today; it is
   turned on for an outlet once that outlet agrees.
 - **Two ways to get it**, chosen per feed by `method`: `"feed"` reads the full
-  text the feed itself carries (some publishers offer a full-text feed);
-  `"page"` opens the article page and keeps its paragraphs, but only if the
-  site's **robots.txt** (a file where a site says which pages automatic
-  readers may open) allows our reader, and at most 15 pages per feed per run.
+  text the feed itself carries in its `content:encoded` field (some publishers
+  offer a full-text feed; the ordinary description is a teaser and is never
+  used); `"page"` opens the article page and keeps its paragraphs, but only if
+  the site's **robots.txt** (a file where a site says which pages automatic
+  readers may open) allows our reader. Per feed per run, at most 15 pages are
+  stored and at most 25 page requests are sent, so links that keep failing
+  cannot block the stories behind them. Feeds fetch side by side, and each
+  feed's text is saved as soon as that feed is done, so a run cut short by the
+  time limit keeps what it already fetched.
   If robots.txt cannot be read, the page is not opened. No paywall or login is
   ever got around.
 - **Stored privately** in the `story_bodies` table (below), never in the

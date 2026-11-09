@@ -21,8 +21,15 @@ export const USER_AGENT = "PressPlayToday/0.1 (+https://pressplay.today; feed re
 export const ROBOTS_TOKEN = "pressplaytoday";
 export const RETENTION_DAYS = 30;
 export const METHODS = ["feed", "page"];
-/** Page fetches per feed per run, so one run stays well inside the 60-second cron limit. */
+/** Pages STORED per feed per run, so one run stays well inside the 60-second cron limit. */
 export const MAX_PAGES_PER_FEED = 15;
+/**
+ * Page requests per feed per run, stored or not. A link that fails (HTTP
+ * error, too short) does not use up a stored slot, so links that keep failing
+ * cannot block the stories behind them; this hard limit keeps the run short.
+ * A robots.txt refusal sends no page request and does not count.
+ */
+export const MAX_PAGE_ATTEMPTS_PER_FEED = 25;
 /** Shorter than this is a teaser or an empty page, not full copy. */
 export const MIN_BODY_CHARS = 200;
 
@@ -57,10 +64,13 @@ export function htmlToText(html = "") {
   return paras.join("\n\n");
 }
 
-/** The full text a feed item itself carries (a full-text feed), or "". */
+/**
+ * The full text a feed item itself carries (a full-text feed), or "".
+ * Only `content:encoded`: rss-parser fills `content` from <description>,
+ * which is the teaser, and a teaser must never be stored as full copy.
+ */
 export function bodyFromFeedItem(item) {
-  const html = (item && (item["content:encoded"] || item.content)) || "";
-  return htmlToText(html);
+  return htmlToText((item && item["content:encoded"]) || "");
 }
 
 /**
