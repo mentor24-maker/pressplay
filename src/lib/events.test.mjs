@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { keyWords, sameEvent, assignEvents, countEvents, linkEvents, LINK_BATCH, PAGE_ROWS } from "./events.js";
+import { keyWords, sameEvent, assignEvents, countEvents, linkEvents, isTitleCase, LINK_BATCH, PAGE_ROWS } from "./events.js";
+import { GUID_BATCH } from "./ingest.js";
 
 const NOW = Date.parse("2026-11-09T18:00:00Z");
 const at = (hoursAgo) => new Date(NOW - hoursAgo * 36e5).toISOString();
@@ -215,6 +216,19 @@ const LIVE_LOOKALIKES = [
     story("MIT scientists turn immune cells into cancer killers inside the body", "Researchers reprogrammed immune cells to attack cancer."),
     story("Scientists wipe out deadly brain tumors in every mouse tested with new cancer therapy", "A new cancer therapy cleared tumors in mice."),
   ],
+  // Found by review (PP-4, round 1): a common institution, or two Title Case headlines, proved nothing.
+  [
+    story("Supreme Court hears arguments in abortion pill case"),
+    story("Supreme Court hears arguments in gun rights case"),
+  ],
+  [
+    story("Stock Market Falls Sharply On Tariff Fears"),
+    story("Stock Market Rises Sharply On Tariff Relief"),
+  ],
+  [
+    story("Stock Market Falls Sharply On Tariff Fears", "Stocks fell on tariff worries."),
+    story("Stock Market Rises Sharply On Tariff Relief", "Stocks rose as tariff relief came."),
+  ],
 ];
 
 test("stories on the same topic but not the same event stay apart (cases seen on the live feeds)", () => {
@@ -226,4 +240,35 @@ test("a headline in Title Case still matches one in sentence case", () => {
     story("Thomas Massie Moves to Force Vote on Impeaching Pete Hegseth", "The Kentucky Republican said he would force a vote."),
     story("Thomas Massie files articles of impeachment against Defense Secretary Pete Hegseth", "Massie filed the articles on Monday."),
   ));
+});
+
+test("an institution in common still groups when the headlines also say what happened", () => {
+  // Seen on the live feeds (2026-11-09): one ruling, two outlets.
+  assert.ok(sameEvent(
+    story("Supreme Court Allows Construction of Trump’s Border Wall in Big Bend", "The administration had asked the court to permit construction of a border wall in southwestern Texas."),
+    story("Supreme Court says border wall construction can continue in west Texas", "The Trump administration filed an emergency request with the high court."),
+  ));
+});
+
+test("Title Case is told apart from sentence case", () => {
+  assert.equal(isTitleCase("Stock Market Falls Sharply On Tariff Fears"), true);
+  assert.equal(isTitleCase("Thomas Massie files articles of impeachment against Defense Secretary Pete Hegseth"), false);
+  assert.equal(isTitleCase("Nvidia Wins"), false, "too few words to tell");
+});
+
+test("a chain of near matches does not pull two unrelated stories into one event", () => {
+  // A~B, B~C, C~D, each pair sharing a name and key words; A and D share no words at all.
+  const A = story("Denver council approves transit budget", "", 8, "A");
+  const B = story("Denver council transit budget passes; Hancock praises vote", "", 6, "B");
+  const C = story("Mayor Hancock praises vote on stadium bond for Broncos", "", 4, "C");
+  const D = story("Broncos stadium bond draws Kroenke bid", "", 2, "D");
+  assert.ok(sameEvent(A, B) && sameEvent(B, C) && sameEvent(C, D), "each neighbour matches");
+  assert.equal(sameEvent(A, D), false);
+  const { links } = assignEvents([A, B, C, D]);
+  const eventOf = new Map(links.map((l) => [l.story_guid, l.event_key]));
+  assert.notEqual(eventOf.get("A"), eventOf.get("D"));
+});
+
+test("the link lookups use ingest's batch size", () => {
+  assert.equal(LINK_BATCH, GUID_BATCH);
 });

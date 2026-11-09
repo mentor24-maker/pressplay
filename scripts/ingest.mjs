@@ -55,10 +55,10 @@ if (supabase) {
   console.log(`Upserted ${written} rows into stories`);
   // Group the last 48 hours of stories into events (private tables).
   const ev = await linkEvents(supabase);
-  errors.push(...ev.errors);
   console.log(ev.failed
-    ? `Events: grouping FAILED (${ev.failed}), see the errors below.`
+    ? `Events: grouping FAILED (${ev.failed}):`
     : `Events: ${ev.considered} stories from the last ${EVENT_WINDOW_HOURS}h looked at; ${ev.linked} newly placed, ${ev.newEvents} new event(s).`);
+  ev.errors.forEach((e) => console.log("  ×", e));
 } else {
   const ev = countEvents(rows);
   console.log(`Events (dry run, nothing stored): these ${ev.stories} stories make ${ev.events} event(s), ${ev.multiSource} of them with more than one story.`);

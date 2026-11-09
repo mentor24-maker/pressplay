@@ -13,30 +13,48 @@
  * - their headlines share at least MIN_SHARED_TITLE key words, and
  * - headline plus snippet share at least MIN_SHARED_ALL key words, which is
  *   at least MIN_OVERLAP of the shorter story's key words, and
- * - at least one key word both headlines share is a name: a word neither
- *   story ever writes in lower case (Denver, Nvidia, Hegseth). Common words
- *   alone ("linked", "lower", "risk") are not enough, and a headline Written
- *   In Title Case does not turn its common words into names, because the
- *   snippets write them in lower case.
+ * - the headlines share a name that proves it is one event (`sharedName`).
+ *   A name is a key word neither story ever writes in lower case, and that
+ *   one of them writes with a capital in ordinary sentence-case text (a
+ *   snippet, or a headline not Written In Title Case): Denver, Nvidia,
+ *   Hegseth. Common words alone ("linked", "lower", "risk") are not enough,
+ *   and two Title Case headlines ("Stock Market Falls Sharply") prove
+ *   nothing by their capitals alone.
+ *   A common institution ("Supreme Court", "White House", "stock market")
+ *   is a name too, but on its own it does not say which event: the court
+ *   hears several cases a day. With only an institution in common, the
+ *   headlines must also share MIN_TOPIC_WORDS words that say what happened
+ *   (not "hears", "case", "ruling", ...).
  * Key words are the words left after dropping common words ("the", "says",
  * "after"...), lower-cased, with a plain plural "s" taken off.
  *
+ * JOINING AN EVENT: a new story joins an event only when it matches at
+ * least half of that event's stories (in the window), not just any one, so
+ * A~B, B~C, C~D does not chain A and D into one event when they share
+ * nothing: by the time D comes, it must match two of A, B and C.
+ *
  * STABLE ACROSS RUNS: a story linked to an event keeps it. Each run only
- * places stories with no event yet: into the event of the closest matching
- * story, or into a new event. A new event's key is the guid of the story
+ * places stories with no event yet: into the closest event it joins, or
+ * into a new event. A new event's key is the guid of the story
  * that started it, so a run repeated after a half-failed write lands on the
  * same keys, and nothing is ever duplicated.
+ *
+ * KNOWN LIMIT (for PP-5): if the events write works and the links write then
+ * fails, the next run may place those stories differently, leaving an event
+ * row with no stories. PP-5 should skip events that have no stories.
  */
 import { cleanText } from "./text.js";
+import { GUID_BATCH } from "./ingest.js";
 
 export const EVENT_WINDOW_HOURS = 48;
 export const MIN_SHARED_TITLE = 2;
 export const MIN_SHARED_ALL = 3;
 export const MIN_OVERLAP = 0.25;
+export const MIN_TOPIC_WORDS = 3;
 /** Rows read per request: Supabase returns at most 1,000 rows at a time. */
 export const PAGE_ROWS = 1000;
-/** story_events lookups per request (guids are often long links, and `.in()` puts them in the URL). */
-export const LINK_BATCH = 50;
+/** story_events lookups per request: the same limit, for the same reason, as ingest's story lookups. */
+export const LINK_BATCH = GUID_BATCH;
 
 /** Common words and news filler that say nothing about which event a story is. */
 const STOP_WORDS = new Set(`
@@ -49,6 +67,22 @@ says said say saying tells told new news latest live update updates report repor
 yesterday tomorrow week weeks year years day days month months time first last next one two three get gets got make
 makes made may might must amid could via per near back still yet ahead set sets watch video photos opinion analysis
 `.split(/\s+/).filter(Boolean));
+
+/**
+ * Institutions so common in the news that sharing one does not, alone, say
+ * two stories are about the same event (key-word form: lower case, no plural "s").
+ */
+const INSTITUTIONS = new Set(`
+supreme court white house congress congressional senate senator representative federal fed reserve
+stock market wall street dow nasdaq pentagon capitol government administration state department
+justice police parliament republican democrat democratic gop fbi cia nato united nation
+`.split(/\s+/).filter(Boolean));
+
+/** Words that say what kind of thing happened, never which event it was. */
+const GENERIC = new Set(`
+hear hearing argument case court ruling rule rules decision decide decides vote votes bill law order orders
+plan plans deal talk talks meeting meet calls call move moves sharply slightly big huge major report key
+`.split(/\s+/).filter(Boolean).map((w) => w.replace(/s$/, "")));
 
 /** A light stem so "votes" meets "vote" and "cities" meets "city". */
 function stem(word) {
@@ -74,8 +108,26 @@ export function keyWords(text = "") {
 
 /** The key words a text writes, at least once, starting with a lower-case letter. */
 export function lowerCaseWords(text = "") {
-  const words = cleanText(String(text)).match(/[\p{L}\p{N}]+(?:['’][\p{L}]+)?/gu) || [];
+  const words = cleanText(String(text)).match(WORD) || [];
   return keyWords(words.filter((w) => /^\p{Ll}/u.test(w)).join(" "));
+}
+
+const WORD = /[\p{L}\p{N}]+(?:['’][\p{L}]+)?/gu;
+
+/**
+ * Is a headline Written In Title Case? Every word of four letters or more
+ * starts with a capital (and there are at least three of them). Its
+ * capitals then say nothing about which words are names.
+ */
+export function isTitleCase(text = "") {
+  const long = (cleanText(String(text)).match(WORD) || []).filter((w) => /^\p{L}{4}/u.test(w));
+  return long.length >= 3 && long.every((w) => /^\p{Lu}/u.test(w));
+}
+
+/** The key words a text writes, at least once, starting with a capital letter. */
+function capitalWords(text = "") {
+  const words = cleanText(String(text)).match(WORD) || [];
+  return keyWords(words.filter((w) => /^\p{Lu}/u.test(w)).join(" "));
 }
 
 /** What the rule compares, worked out once per story. */
@@ -83,7 +135,27 @@ export function profile(story) {
   const title = keyWords(story.title || "");
   const all = new Set([...title, ...keyWords(story.snippet || "")]);
   const lower = lowerCaseWords(`${story.title || ""} ${story.snippet || ""}`);
-  return { title, all, lower, at: Date.parse(story.published_at) };
+  // Capitals that count as evidence of a name: the snippet always, the headline unless it is in Title Case.
+  const capitals = capitalWords(`${isTitleCase(story.title) ? "" : story.title || ""} ${story.snippet || ""}`);
+  return { title, all, lower, capitals, at: Date.parse(story.published_at) };
+}
+
+/**
+ * Do two headlines share a name that proves they are one event? A real name
+ * (Nvidia, Hegseth) is enough; an institution alone needs MIN_TOPIC_WORDS
+ * shared words besides it that say what happened.
+ */
+export function sharedName(pa, pb) {
+  let institution = false;
+  let topic = 0;
+  for (const w of pa.title) {
+    if (!pb.title.has(w)) continue;
+    const isName = /^\p{L}/u.test(w) && !pa.lower.has(w) && !pb.lower.has(w) && (pa.capitals.has(w) || pb.capitals.has(w));
+    if (isName && !INSTITUTIONS.has(w)) return true;
+    if (isName) institution = true;
+    else if (!GENERIC.has(w)) topic++;
+  }
+  return institution && topic >= MIN_TOPIC_WORDS;
 }
 
 const sharedCount = (a, b) => { let n = 0; for (const w of a) if (b.has(w)) n++; return n; };
@@ -102,11 +174,7 @@ export function matchScore(a, b) {
   const shared = sharedCount(pa.all, pb.all);
   if (shared < MIN_SHARED_ALL) return 0;
   if (shared / Math.min(pa.all.size, pb.all.size) < MIN_OVERLAP) return 0;
-  let sharesName = false;
-  for (const w of pa.title) {
-    if (pb.title.has(w) && /^\p{L}/u.test(w) && !pa.lower.has(w) && !pb.lower.has(w)) { sharesName = true; break; }
-  }
-  if (!sharesName) return 0;
+  if (!sharedName(pa, pb)) return 0;
   return shared;
 }
 
@@ -117,9 +185,9 @@ export const sameEvent = (a, b) => matchScore(a, b) > 0;
  * Place every story that has no event yet.
  * `stories`: rows with guid, title, snippet, published_at.
  * `linked`: Map guid -> event key, for stories that already have one (kept as is).
- * Stories are placed oldest first. Each joins the event of the story it
- * matches best (an already-placed one), or starts a new event keyed by its
- * own guid. Returns { links: [{story_guid, event_key}], events: [{key, ...}] }
+ * Stories are placed oldest first. Each joins the event, among those it
+ * matches at least half the stories of, that it matches most of (then by
+ * total score), or starts a new event keyed by its own guid. Returns { links: [{story_guid, event_key}], events: [{key, ...}] }
  * holding only what is new this time.
  */
 export function assignEvents(stories, linked = new Map()) {
@@ -127,8 +195,9 @@ export function assignEvents(stories, linked = new Map()) {
   for (const s of stories) if (s && s.guid && !unique.has(s.guid)) unique.set(s.guid, s);
   const ordered = [...unique.values()].sort((a, b) => Date.parse(a.published_at) - Date.parse(b.published_at) || (a.guid < b.guid ? -1 : 1));
 
-  const placed = []; // { profile, key }
-  for (const s of ordered) if (linked.has(s.guid)) placed.push({ p: profile(s), key: linked.get(s.guid) });
+  const members = new Map(); // event key -> profiles of its stories
+  const add = (key, p) => { if (!members.has(key)) members.set(key, []); members.get(key).push(p); };
+  for (const s of ordered) if (linked.has(s.guid)) add(linked.get(s.guid), profile(s));
 
   const links = [];
   const newEvents = new Map();
@@ -136,14 +205,21 @@ export function assignEvents(stories, linked = new Map()) {
     if (linked.has(s.guid)) continue;
     const p = profile(s);
     let best = null;
+    let bestHits = 0;
     let bestScore = 0;
-    for (const other of placed) {
-      const score = matchScore(p, other.p);
-      if (score > bestScore) { bestScore = score; best = other; }
+    for (const [key, ps] of members) {
+      let hits = 0;
+      let score = 0;
+      for (const other of ps) {
+        const m = matchScore(p, other);
+        if (m > 0) { hits++; score += m; }
+      }
+      if (hits * 2 < ps.length) continue; // must match at least half of the event's stories
+      if (hits > bestHits || (hits === bestHits && score > bestScore)) { best = key; bestHits = hits; bestScore = score; }
     }
-    const key = best ? best.key : s.guid;
+    const key = best ?? s.guid;
     if (!best) newEvents.set(key, { key, first_published_at: s.published_at });
-    placed.push({ p, key });
+    add(key, p);
     links.push({ story_guid: s.guid, event_key: key });
   }
   return { links, events: [...newEvents.values()] };

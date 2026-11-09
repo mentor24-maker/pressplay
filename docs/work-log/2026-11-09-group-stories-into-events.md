@@ -23,3 +23,17 @@ The groups live in two new private tables that the public website key cannot
 open, just like the full text. Running ingestion again never makes duplicate
 groups: a story keeps its group once it has one. Fourteen new automatic tests
 check all of this.
+
+**Second round, after review.** Review found two ways different events could
+still end up in one group. First, a big institution counted as the shared
+name: "Supreme Court hears arguments in abortion pill case" and "... in gun
+rights case" were grouped, and so were "Stock Market Falls Sharply" and
+"Stock Market Rises Sharply". Now an institution like the Supreme Court, the
+White House or the stock market only counts when the headlines also share
+three words about what actually happened (the border wall ruling still
+groups). A headline Written In Title Case no longer turns ordinary words into
+"names" either. Second, chaining: a story could join a group by matching
+just one member, so a string of near matches could pull together stories
+that share nothing. Now a story has to match at least half of a group to join
+it. Both review cases and a chaining case are now permanent tests, and the
+same 12 real groups still form on today's live news.
