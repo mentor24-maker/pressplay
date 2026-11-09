@@ -6,6 +6,8 @@ A working Next.js + Supabase foundation for Phase One: real RSS ingestion,
 attention-ranked story storage, a branded homepage, and the database schema for
 games, plays, streaks, and predictions.
 
+For a plain-English tour of everything built so far, read [docs/OVERVIEW.md](docs/OVERVIEW.md).
+
 ## What's here
 
 ```
