@@ -152,16 +152,20 @@ columns).
 | `predictions` | "What happens next?" questions tied to a story, with the options, when it resolves, and (later) the outcome. | No. |
 | `prediction_picks` | Each player's pick on a prediction, and the points awarded. One pick per player per prediction. | No. |
 | `story_bodies` | **Private.** The full text of a story, from outlets that allow it: how it was fetched (`feed` or `page`), the outlet, and when. Deleted after 30 days, and with its story. | Written by ingestion only for feeds with full copy on (none yet). |
+| `events` | **Private.** One row per news event: stories from different outlets about the same thing share one event, so one fact sheet can be written per event. Its key is the first story's guid. | **Yes.** Ingestion writes it every run (`src/lib/events.js`). |
+| `story_events` | **Private.** Which event each story belongs to, one row per story. Deleted with its story. | **Yes.** Ingestion writes it every run. |
 
 (The ticket for this overview listed five tables; the schema had six, with
-`prediction_picks` the sixth. `story_bodies` made seven on 9 November 2026.)
+`prediction_picks` the sixth. `story_bodies` made seven on 9 November 2026; `events` and `story_events`
+made nine the same day.)
 
 **Row Level Security** (database rules about who may read or change which
 rows) is switched on for every table: anyone may read stories, published
 games and predictions; a player may see and update their own profile, and
-see and add their own plays and picks. `story_bodies` has **no** rule letting
+see and add their own plays and picks. `story_bodies`, `events` and
+`story_events` have **no** rule letting
 anyone read it, and the public and signed-in keys are refused access to it
-outright, so only the server can read full copy. The server's own master key
+outright, so only the server can read full copy or the event groups. The server's own master key
 (below) skips these rules, which is how ingestion writes stories.
 
 ---
