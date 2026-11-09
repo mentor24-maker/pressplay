@@ -121,35 +121,64 @@ function robotsPatternMatches(pattern, path) {
   return new RegExp("^" + re + (anchored ? "$" : "")).test(path);
 }
 
+/** Redirects followed per page, each one checked again before it is fetched. */
+export const MAX_REDIRECTS = 3;
+
+/** "www.news.example" and "news.example" are the same outlet; anything else is not. */
+const siteOf = (u) => u.hostname.toLowerCase().replace(/^www\./, "");
+
 /**
  * Fetch one article page's text, honouring robots.txt.
  * Returns { text, error }. `error` never contains page text.
  * A robots.txt that is missing (404) allows; one that cannot be read any
  * other way refuses, so a doubt never becomes a fetch.
+ * Redirects are followed by hand (at most MAX_REDIRECTS): every hop must stay
+ * on the outlet's own site and pass robots.txt again, so a link that bounces
+ * to a disallowed path, a login or another site is never fetched.
  */
 export async function fetchPageBody(url, { fetchImpl = fetch, robotsCache = new Map() } = {}) {
   let target;
   try { target = new URL(url); } catch { return { text: "", error: "not a valid link" }; }
-  if (!/^https?:$/.test(target.protocol)) return { text: "", error: "not a web link" };
+  const site = siteOf(target);
 
-  let allowed = robotsCache.get(target.origin);
-  if (allowed === undefined) {
-    allowed = await readRobots(target.origin, fetchImpl);
-    robotsCache.set(target.origin, allowed);
-  }
-  if (typeof allowed === "string") return { text: "", error: allowed };
-  if (!allowed(target.pathname + target.search)) return { text: "", error: "robots.txt does not allow it" };
+  for (let hop = 0; ; hop++) {
+    if (!/^https?:$/.test(target.protocol)) return { text: "", error: hop ? "redirected off the web, not fetched" : "not a web link" };
+    if (siteOf(target) !== site) return { text: "", error: "redirected to another site, not fetched" };
 
-  try {
-    const res = await fetchImpl(target.href, {
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(10000),
-    });
+    let allowed = robotsCache.get(target.origin);
+    if (allowed === undefined) {
+      allowed = await readRobots(target.origin, fetchImpl);
+      robotsCache.set(target.origin, allowed);
+    }
+    if (typeof allowed === "string") return { text: "", error: allowed };
+    if (!allowed(target.pathname + target.search)) {
+      return { text: "", error: hop ? "redirected to a page robots.txt does not allow, not fetched" : "robots.txt does not allow it" };
+    }
+
+    let res;
+    try {
+      res = await fetchImpl(target.href, {
+        headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (err) {
+      return { text: "", error: `could not fetch (${err.name || "error"})` };
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers && typeof res.headers.get === "function" ? res.headers.get("location") : null;
+      if (!location) return { text: "", error: `HTTP ${res.status} with no redirect target` };
+      if (hop >= MAX_REDIRECTS) return { text: "", error: `more than ${MAX_REDIRECTS} redirects, not fetched` };
+      try { target = new URL(location, target); } catch { return { text: "", error: "redirect to an invalid link" }; }
+      continue;
+    }
     if (!res.ok) return { text: "", error: `HTTP ${res.status}` };
-    return { text: extractArticleText(await res.text()), error: null };
-  } catch (err) {
-    return { text: "", error: `could not fetch (${err.name || "error"})` };
+    try {
+      return { text: extractArticleText(await res.text()), error: null };
+    } catch (err) {
+      return { text: "", error: `could not read the page (${err.name || "error"})` };
+    }
   }
 }
 

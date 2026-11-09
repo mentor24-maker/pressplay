@@ -15,5 +15,16 @@ and it is deleted after 30 days.
 
 The written copyright rule was updated everywhere it appears: full copy may be
 stored privately from outlets that agree, and only headlines, short snippets,
-facts and the link back are ever published. Sixteen new automatic tests check
+facts and the link back are ever published. Sixteen new automatic tests (21 after review) check
 these rules on every change.
+
+**After review sent it back (same day):** four fixes. The database setup file
+can now really be run a second time: before, a second run stopped partway and
+the locked table was never created, so setting it up on the live database
+would have failed. A tested copy of Postgres now runs it twice cleanly, and the
+public key is still refused. When an article link forwards to another address,
+each step is now checked against the site's rules again, and a link that
+forwards to another website (a paywall, say) is never opened. The 30-day
+clean-up now runs first, so a slow run that hits the time limit still deletes
+old text. And the run report now says plainly when a step failed, instead of
+showing a zero as if all was well. Five more tests cover these.

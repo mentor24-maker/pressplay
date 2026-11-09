@@ -26,6 +26,8 @@ export { cleanText };
 
 const SNIPPET_MAX = 280;
 const MAX_AGE_HOURS = 48;
+/** story_bodies lookups per request: guids are often long links, and `.in()` puts them all in the URL. */
+export const GUID_BATCH = 50;
 
 /** Truncate at a word boundary. */
 export function snippet(text, max = SNIPPET_MAX) {
@@ -156,42 +158,52 @@ export async function ingestAll(feeds, supabase = null, { parseFeed, fetchImpl =
   const errors = results.filter((r) => r.error).map((r) => `${r.feed}: ${r.error}`);
 
   let written = 0;
-  const fullCopy = { candidates: candidates.length, stored: 0, deleted: 0 };
+  // `failed` names each story_bodies step that did not work this run, so the
+  // report says so instead of printing a count of zero as if all was well.
+  const fullCopy = { candidates: candidates.length, stored: 0, deleted: 0, failed: [] };
   if (!supabase) return { fetched: rows.length, written, errors, rows, fullCopy };
 
+  // Retention first, every run, even with every feed off: page fetches below
+  // can be slow, and a run cut short by the time limit must still clear old
+  // copy (and copy a feed left behind before it was turned off).
+  const del = await supabase.from("story_bodies").delete({ count: "exact" }).lt("fetched_at", retentionCutoff(now));
+  if (del.error) { errors.push(`supabase (story_bodies clean-up): ${del.error.message}`); fullCopy.failed.push("clean-up"); }
+  else fullCopy.deleted = del.count ?? 0;
+
+  let storiesSaved = true;
   if (rows.length) {
     // Upsert on guid: re-running never duplicates; attention refreshes each run.
     const { error, count } = await supabase
       .from("stories")
       .upsert(rows, { onConflict: "guid", ignoreDuplicates: false, count: "exact" });
-    if (error) errors.push(`supabase: ${error.message}`);
+    if (error) { errors.push(`supabase: ${error.message}`); storiesSaved = false; }
     else written = count ?? rows.length;
   }
 
   // Full copy only once its stories are saved (story_bodies points at stories.guid).
-  if (candidates.length && !errors.some((e) => e.startsWith("supabase: "))) {
+  if (candidates.length && !storiesSaved) fullCopy.failed.push("skipped (stories not saved)");
+  if (candidates.length && storiesSaved) {
+    const already = new Set();
+    let readOk = true;
     const guids = candidates.map((c) => c.story_guid);
-    const { data, error } = await supabase.from("story_bodies").select("story_guid").in("story_guid", guids);
-    if (error) errors.push(`supabase (story_bodies read): ${error.message}`);
+    for (let i = 0; i < guids.length; i += GUID_BATCH) {
+      const { data, error } = await supabase.from("story_bodies").select("story_guid").in("story_guid", guids.slice(i, i + GUID_BATCH));
+      if (error) { errors.push(`supabase (story_bodies read): ${error.message}`); readOk = false; break; }
+      for (const d of data || []) already.add(d.story_guid);
+    }
+    if (!readOk) fullCopy.failed.push("read");
     else {
-      const already = new Set((data || []).map((d) => d.story_guid));
       const resolved = await resolveBodies(candidates, { already, fetchImpl, now });
       errors.push(...resolved.errors);
       if (resolved.rows.length) {
         const up = await supabase
           .from("story_bodies")
           .upsert(resolved.rows, { onConflict: "story_guid", ignoreDuplicates: true, count: "exact" });
-        if (up.error) errors.push(`supabase (story_bodies write): ${up.error.message}`);
+        if (up.error) { errors.push(`supabase (story_bodies write): ${up.error.message}`); fullCopy.failed.push("write"); }
         else fullCopy.stored = up.count ?? resolved.rows.length;
       }
     }
   }
-
-  // Retention runs every time, even with every feed off, so turning a feed
-  // off later still clears what it left behind.
-  const del = await supabase.from("story_bodies").delete({ count: "exact" }).lt("fetched_at", retentionCutoff(now));
-  if (del.error) errors.push(`supabase (story_bodies clean-up): ${del.error.message}`);
-  else fullCopy.deleted = del.count ?? 0;
 
   return { fetched: rows.length, written, errors, rows, fullCopy };
 }

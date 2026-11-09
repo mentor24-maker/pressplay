@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   fullCopyPolicy, htmlToText, bodyFromFeedItem, extractArticleText,
-  robotsAllows, fetchPageBody, retentionCutoff, RETENTION_DAYS,
+  robotsAllows, fetchPageBody, retentionCutoff, RETENTION_DAYS, MAX_REDIRECTS,
 } from "./fullCopy.js";
 
 test("full copy is off unless a feed says allowed: true with a known method", () => {
@@ -62,7 +62,8 @@ function fakeFetch(routes) {
     const r = routes[url];
     if (r === undefined) return { ok: false, status: 404, text: async () => "" };
     if (r instanceof Error) throw r;
-    return { ok: (r.status ?? 200) < 400, status: r.status ?? 200, text: async () => r.body ?? "" };
+    const headers = { get: (h) => (h.toLowerCase() === "location" ? r.location ?? null : null) };
+    return { ok: (r.status ?? 200) < 300, status: r.status ?? 200, headers, text: async () => r.body ?? "" };
   };
   return { impl, calls };
 }
@@ -102,4 +103,47 @@ test("retention is 30 days", () => {
   assert.equal(RETENTION_DAYS, 30);
   const now = Date.parse("2026-11-09T12:00:00Z");
   assert.equal(retentionCutoff(now), "2026-10-10T12:00:00.000Z");
+});
+
+test("a redirect to a path robots.txt disallows is never fetched", async () => {
+  const { impl, calls } = fakeFetch({
+    "https://news.example/robots.txt": { body: "User-agent: *\nDisallow: /members/" },
+    "https://news.example/story": { status: 302, location: "/members/login?next=/story" },
+    "https://news.example/members/login?next=/story": { body: "<article><p>LOGIN WALL</p></article>" },
+  });
+  const got = await fetchPageBody("https://news.example/story", { fetchImpl: impl });
+  assert.equal(got.text, "");
+  assert.match(got.error, /redirected to a page robots\.txt does not allow/);
+  assert.deepEqual(calls, ["https://news.example/robots.txt", "https://news.example/story"]);
+});
+
+test("a redirect to another site is never fetched; one on the same site is checked and followed", async () => {
+  const off = fakeFetch({
+    "https://news.example/story": { status: 301, location: "https://paywall.example/subscribe" },
+  });
+  const away = await fetchPageBody("https://news.example/story", { fetchImpl: off.impl });
+  assert.match(away.error, /another site/);
+  assert.equal(off.calls.some((u) => u.includes("paywall.example")), false);
+
+  const same = fakeFetch({
+    "https://news.example/s": { status: 301, location: "https://www.news.example/2026/s" },
+    "https://www.news.example/robots.txt": { body: "User-agent: *\nAllow: /" },
+    "https://www.news.example/2026/s": { body: "<article><p>Moved here.</p></article>" },
+  });
+  const ok = await fetchPageBody("https://news.example/s", { fetchImpl: same.impl });
+  assert.deepEqual(ok, { text: "Moved here.", error: null });
+  assert.ok(same.calls.includes("https://www.news.example/robots.txt"), "the new host's robots.txt is read too");
+});
+
+test("redirects stop after MAX_REDIRECTS hops, and a page is always fetched with redirect: manual", async () => {
+  const seen = [];
+  const impl = async (url, opts) => {
+    seen.push(opts && opts.redirect);
+    if (url.endsWith("/robots.txt")) return { ok: false, status: 404, headers: { get: () => null }, text: async () => "" };
+    const n = Number(url.split("/").pop());
+    return { ok: false, status: 302, headers: { get: () => `/${n + 1}` }, text: async () => "" };
+  };
+  const got = await fetchPageBody("https://loop.example/0", { fetchImpl: impl });
+  assert.match(got.error, new RegExp(`more than ${MAX_REDIRECTS} redirects`));
+  assert.ok(seen.filter((r) => r !== undefined).every((r) => r === "manual"));
 });

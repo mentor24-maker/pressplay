@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ingestAll, normalizeItem } from "./ingest.js";
+import { ingestAll, normalizeItem, GUID_BATCH } from "./ingest.js";
 
 const NOW = Date.parse("2026-11-09T18:00:00Z");
 const LONG = "The council voted seven to two on Tuesday night. ".repeat(20).trim();
@@ -18,12 +18,12 @@ const parsedFeed = () => ({
 });
 
 /** A stand-in for the Supabase client that records every call. */
-function fakeSupabase({ stored = [] } = {}) {
+function fakeSupabase({ stored = [], fail = {} } = {}) {
   const calls = [];
   const from = (table) => ({
-    upsert: async (rows, opts) => { calls.push({ table, op: "upsert", rows, opts }); return { error: null, count: rows.length }; },
+    upsert: async (rows, opts) => { calls.push({ table, op: "upsert", rows, opts }); return fail[`${table}:upsert`] ? { error: { message: "boom" } } : { error: null, count: rows.length }; },
     select: () => ({ in: async (col, vals) => { calls.push({ table, op: "select", vals }); return { data: stored.filter((g) => vals.includes(g)).map((g) => ({ story_guid: g })), error: null }; } }),
-    delete: () => ({ lt: async (col, cutoff) => { calls.push({ table, op: "delete", col, cutoff }); return { error: null, count: 0 }; } }),
+    delete: () => ({ lt: async (col, cutoff) => { calls.push({ table, op: "delete", col, cutoff }); return fail[`${table}:delete`] ? { error: { message: "boom" } } : { error: null, count: 0 }; } }),
   });
   return { from, calls };
 }
@@ -37,9 +37,9 @@ test("with full copy off, stories are written as before and story_bodies only ge
   assert.equal(res.written, 2);
   assert.deepEqual(res.errors, []);
   const ops = sb.calls.map((c) => `${c.table}:${c.op}`);
-  assert.deepEqual(ops, ["stories:upsert", "story_bodies:delete"]);
-  assert.equal(sb.calls[1].cutoff, "2026-10-10T18:00:00.000Z");
-  assert.deepEqual(res.fullCopy, { candidates: 0, stored: 0, deleted: 0 });
+  assert.deepEqual(ops, ["story_bodies:delete", "stories:upsert"], "clean-up runs first");
+  assert.equal(sb.calls[0].cutoff, "2026-10-10T18:00:00.000Z");
+  assert.deepEqual(res.fullCopy, { candidates: 0, stored: 0, deleted: 0, failed: [] });
 });
 
 test("a permitted feed stores full copy privately and the public row is unchanged", async () => {
@@ -76,7 +76,7 @@ test("a dry run fetches no article page and stores nothing", async () => {
   const feed = { name: "Partner", url: "u", category: "top", fullCopy: { allowed: true, method: "page" } };
   const res = await ingestAll([feed], null, { parseFeed: async () => parsedFeed(), fetchImpl: noFetch, now: NOW });
   assert.equal(res.fetched, 2);
-  assert.deepEqual(res.fullCopy, { candidates: 2, stored: 0, deleted: 0 });
+  assert.deepEqual(res.fullCopy, { candidates: 2, stored: 0, deleted: 0, failed: [] });
 });
 
 test("page method: robots.txt refusal is reported by link, without any text", async () => {
@@ -108,4 +108,32 @@ test("an unusable setting is named and treated as off", async () => {
   assert.equal(res.written, 2);
   assert.match(res.errors[0], /^Odd: fullCopy\.method must be one of feed, page; full copy treated as off$/);
   assert.equal(res.fullCopy.candidates, 0);
+});
+
+test("a failed step is recorded, not reported as zero", async () => {
+  const feed = { name: "Partner", url: "u", category: "top", fullCopy: { allowed: true, method: "feed" } };
+  const opts = { parseFeed: async () => parsedFeed(), fetchImpl: noFetch, now: NOW };
+
+  const noStories = fakeSupabase({ fail: { "stories:upsert": true, "story_bodies:delete": true } });
+  const a = await ingestAll([feed], noStories, opts);
+  assert.deepEqual(a.fullCopy.failed, ["clean-up", "skipped (stories not saved)"]);
+  assert.equal(noStories.calls.some((c) => c.table === "story_bodies" && c.op !== "delete"), false, "no full copy without its stories");
+
+  const noWrite = fakeSupabase({ fail: { "story_bodies:upsert": true } });
+  const b = await ingestAll([feed], noWrite, opts);
+  assert.deepEqual(b.fullCopy.failed, ["write"]);
+  assert.equal(b.fullCopy.stored, 0);
+  assert.match(b.errors.join("\n"), /story_bodies write/);
+});
+
+test("the stored-already lookup goes in batches", async () => {
+  const many = { items: Array.from({ length: GUID_BATCH + 5 }, (_, n) => ({
+    title: `S${n}`, link: `https://news.example/${n}`, guid: `g${n}`,
+    isoDate: new Date(NOW - 60e3).toISOString(), "content:encoded": `<p>${LONG}</p>`,
+  })) };
+  const sb = fakeSupabase();
+  const feed = { name: "Partner", url: "u", category: "top", fullCopy: { allowed: true, method: "feed" } };
+  await ingestAll([feed], sb, { parseFeed: async () => many, fetchImpl: noFetch, now: NOW });
+  const reads = sb.calls.filter((c) => c.op === "select").map((c) => c.vals.length);
+  assert.deepEqual(reads, [GUID_BATCH, 5]);
 });

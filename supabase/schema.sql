@@ -85,6 +85,7 @@ create table if not exists prediction_picks (
 
 -- Row Level Security: public read for published content, users own their rows.
 alter table stories enable row level security;
+drop policy if exists "stories are public" on stories;
 create policy "stories are public" on stories for select using (true);
 
 -- story_bodies: Row Level Security ON and deliberately NO policy, plus no
@@ -94,21 +95,29 @@ alter table story_bodies enable row level security;
 revoke all on story_bodies from anon, authenticated;
 
 alter table games enable row level security;
+drop policy if exists "published games are public" on games;
 create policy "published games are public" on games for select using (status = 'published');
 
 alter table profiles enable row level security;
+drop policy if exists "read own profile" on profiles;
 create policy "read own profile"   on profiles for select using (auth.uid() = id);
+drop policy if exists "update own profile" on profiles;
 create policy "update own profile" on profiles for update using (auth.uid() = id);
 
 alter table plays enable row level security;
+drop policy if exists "read own plays" on plays;
 create policy "read own plays"   on plays for select using (auth.uid() = profile_id);
+drop policy if exists "insert own plays" on plays;
 create policy "insert own plays" on plays for insert with check (auth.uid() = profile_id);
 
 alter table predictions enable row level security;
+drop policy if exists "predictions are public" on predictions;
 create policy "predictions are public" on predictions for select using (true);
 
 alter table prediction_picks enable row level security;
+drop policy if exists "read own picks" on prediction_picks;
 create policy "read own picks"   on prediction_picks for select using (auth.uid() = profile_id);
+drop policy if exists "insert own picks" on prediction_picks;
 create policy "insert own picks" on prediction_picks for insert with check (auth.uid() = profile_id);
 
 -- Service-role key (used by the ingester and editorial tools) bypasses RLS.

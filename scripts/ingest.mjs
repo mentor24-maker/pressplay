@@ -7,17 +7,26 @@
  */
 import { readFileSync } from "node:fs";
 import { ingestAll, ingestXml } from "../src/lib/ingest.js";
-import { fullCopyPolicy } from "../src/lib/fullCopy.js";
+import { fullCopyPolicy, RETENTION_DAYS } from "../src/lib/fullCopy.js";
 import { supabaseAdmin } from "../src/lib/supabaseAdmin.js";
 
-/** One line about full copy: counts only, never the text itself. */
-function fullCopyLine(feedList, fc, writing) {
+/** Lines about full copy: counts only, never the text itself. A failed step says so. */
+function fullCopyLines(feedList, fc, writing) {
+  const lines = [];
   const on = feedList.filter((f) => fullCopyPolicy(f).allowed).map((f) => f.name);
-  if (!on.length) return `Full copy: off for all ${feedList.length} feeds (nothing stored privately).`;
-  const head = `Full copy: on for ${on.length} feed(s) (${on.join(", ")}); ${fc.candidates} candidate stories`;
-  return writing
-    ? `${head}, ${fc.stored} newly stored in story_bodies, ${fc.deleted} older than 30 days deleted.`
-    : `${head} (dry run: no article page fetched, nothing stored).`;
+  if (!on.length) lines.push(`Full copy: off for all ${feedList.length} feeds (nothing stored privately).`);
+  else {
+    const head = `Full copy: on for ${on.length} feed(s) (${on.join(", ")}); ${fc.candidates} candidate stories`;
+    if (!writing) lines.push(`${head} (dry run: no article page fetched, nothing stored).`);
+    else if (fc.failed.some((s) => s !== "clean-up")) lines.push(`${head}; storing FAILED (${fc.failed.filter((s) => s !== "clean-up").join(", ")}), see the errors below.`);
+    else lines.push(`${head}, ${fc.stored} newly stored in story_bodies.`);
+  }
+  if (writing) {
+    lines.push(fc.failed.includes("clean-up")
+      ? `Clean-up of full copy older than ${RETENTION_DAYS} days FAILED, see the errors below.`
+      : `Clean-up: ${fc.deleted} full-copy row(s) older than ${RETENTION_DAYS} days deleted.`);
+  }
+  return lines.join("\n");
 }
 
 const args = new Set(process.argv.slice(2));
@@ -40,7 +49,7 @@ if (!supabase && !args.has("--dry")) {
 const t0 = Date.now();
 const { fetched, written, errors, rows, fullCopy } = await ingestAll(feeds, supabase);
 console.log(`\nFetched ${fetched} fresh stories from ${feeds.length} feeds in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-console.log(fullCopyLine(feeds, fullCopy, !!supabase));
+console.log(fullCopyLines(feeds, fullCopy, !!supabase));
 if (supabase) console.log(`Upserted ${written} rows into stories`);
 else {
   console.log("(dry run — nothing written). Top 10 by attention:\n");
