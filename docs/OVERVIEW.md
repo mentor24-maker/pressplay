@@ -95,8 +95,9 @@ anywhere. The rules, in `src/lib/fullCopy.js`:
   readers may open) allows our reader. Per feed per run, at most 15 pages are
   stored and at most 25 page requests are sent, so links that keep failing
   cannot block the stories behind them. Feeds fetch side by side, and each
-  feed's text is saved as soon as that feed is done, so a run cut short by the
-  time limit keeps what it already fetched.
+  feed's text is saved as soon as that feed is done. There is no time limit on
+  the run as a whole yet, so a run cut off by the scheduled run's 60-second
+  limit loses the text of any feed it was still fetching.
   If robots.txt cannot be read, the page is not opened. No paywall or login is
   ever got around.
 - **Stored privately** in the `story_bodies` table (below), never in the
@@ -105,6 +106,18 @@ anywhere. The rules, in `src/lib/fullCopy.js`:
 - **Never in a log.** Errors name the feed and the link, never the text; the
   run reports only counts ("Full copy: off for all 10 feeds").
 - **Kept 30 days**, then deleted on the next run.
+- **Not safe to switch on yet.** The PP-3 review (9 November 2026) found
+  these must be fixed before any outlet's `allowed` is turned on:
+  - one time limit for the whole run, with text saved in batches as it
+    arrives, so a cut-off run keeps what it fetched;
+  - robots.txt matching our reader's name on the part before the "/", so a
+    site that writes `PressPlayToday/0.1` gets the rules it wrote for us;
+  - keeping the article itself, not the first `<article>` on the page (often
+    a related-story card), since stored text is kept for good;
+  - a limit on the size and type of a downloaded page, and closing a page we
+    stop reading after a redirect or an error;
+  - one shared page cap when two feeds come from the same outlet;
+  - not trying failed or teaser links again, and logging them, on every run.
 
 A dry run never opens an article page and stores nothing.
 
