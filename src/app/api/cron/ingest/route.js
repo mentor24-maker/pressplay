@@ -18,6 +18,7 @@ export async function GET(request) {
   const file = path.join(process.cwd(), "data", "feeds.json");
   const { feeds } = JSON.parse(readFileSync(file, "utf8"));
   const supabase = supabaseAdmin();
-  const { fetched, written, errors } = await ingestAll(feeds, supabase);
-  return Response.json({ ok: true, fetched, written, dryRun: !supabase, errors });
+  // fullCopy is counts only; the text itself never leaves the server.
+  const { fetched, written, errors, fullCopy } = await ingestAll(feeds, supabase);
+  return Response.json({ ok: true, fetched, written, fullCopy, dryRun: !supabase, errors });
 }
