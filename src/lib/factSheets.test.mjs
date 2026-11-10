@@ -311,6 +311,17 @@ test("the worst case of the longest event allowed covers a prompt billed at the 
   assert.ok(worstCaseCost(MAX_INPUT_CHARS) >= realistic);
 });
 
+test("an event estimated just under 100,000 tokens is booked at the higher price, so a bill just over the line is still covered", () => {
+  const chars = 196_000; // at an average 2 characters per token this is 100,000 tokens: under the line
+  const billed = costOf({ input_tokens: LONG_PROMPT_TOKENS + 1, output_tokens: MAX_OUTPUT_TOKENS });
+  assert.ok(worstCaseCost(chars) >= billed, `booked ${worstCaseCost(chars)}, billed ${billed}`);
+});
+
+test("a small event is still booked at the cheap rate", () => {
+  assert.equal(worstCaseCost(5000), costOf({ input_tokens: 5000 + 2000, output_tokens: MAX_OUTPUT_TOKENS }));
+  assert.ok(worstCaseCost(5000) < 0.01);
+});
+
 test("an answer that names a story outside the event, or misses one, is refused and nothing is stored", async () => {
   const cases = [
     { ...GOOD, facts: [{ fact: "x", sources: ["S9"] }] },

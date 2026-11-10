@@ -164,9 +164,11 @@ left out, so nothing is written until an outlet's full copy is switched on.
 **Spending stops at $10 a month.** Every call is booked in the private
 `ai_spend` table before it is made, at the most it could cost, and the step
 stops, saying so, when the month (UTC) would pass $10. A typical sheet costs
-about a quarter of a cent (around 10,000 tokens in and 3,000 out, at $0.10
-and $0.50 per million), so $10 covers thousands. A call whose prompt is over
-100,000 tokens pays five times that rate, and the count knows it; the
+roughly a quarter of a cent (around 10,000 tokens in and 3,000 out, at $0.10
+and $0.50 per million; a rough figure, since the model's thinking counts as
+output and varies), so $10 covers thousands. A call whose prompt is over
+100,000 tokens pays five times that rate, and the count knows it: any event
+long enough that it could cross that line is booked at the higher rate; the
 longest event allowed costs at most about 12 cents. An event is sent again only when a new story has joined
 it: a story whose copy expires after 30 days is not a change, and a stored
 sheet is never replaced by one written from fewer stories. A call that gets

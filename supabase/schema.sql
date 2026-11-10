@@ -80,7 +80,7 @@ create table if not exists fact_sheets (
 -- is made, at its worst possible cost (reserved_usd); when the reply comes
 -- back, cost_usd holds what it really cost. A month's spend is each row's
 -- cost_usd, or its reserved_usd while cost_usd is empty. The fact-sheet step
--- stops when that passes $50 for the month (UTC).
+-- stops when that passes $10 for the month (UTC).
 create table if not exists ai_spend (
   id             bigint generated always as identity primary key,
   month          text not null,                -- 'YYYY-MM', UTC

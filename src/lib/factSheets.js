@@ -99,13 +99,18 @@ function priced(inputTokens, outputTokens) {
 }
 
 /**
- * The most a call can cost: input counted at one token per 2 characters
- * (Anthropic puts the current tokenizer at about 2.5 on average), plus room
- * for the instructions, plus every output token allowed, at the higher price
- * whenever that count is over LONG_PROMPT_TOKENS.
+ * The most a call can cost: input counted at one token per character (the
+ * current tokenizer averages about 2.5 characters per token, and text dense
+ * in numbers, tables or non-English copy runs lower, but news text does not
+ * go under one), plus room for the instructions, plus every output token
+ * allowed, at the price that count is billed at. Counting this high matters
+ * at LONG_PROMPT_TOKENS: over it the WHOLE request costs five times as much,
+ * so a booking that guessed a prompt just under the line would not be the
+ * worst case. Bookings settle to the real cost afterwards, so the margin
+ * costs nothing.
  */
 export function worstCaseCost(inputChars) {
-  return priced(Math.ceil(inputChars / 2) + 2000, MAX_OUTPUT_TOKENS);
+  return priced(inputChars + 2000, MAX_OUTPUT_TOKENS);
 }
 
 /** A short fingerprint of a set of story guids, order ignored. */
