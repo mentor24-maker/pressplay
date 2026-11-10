@@ -146,6 +146,36 @@ saved, and any feed errors.
 To stop strangers triggering it, the address checks a password,
 `CRON_SECRET`, which Vercel sends automatically.
 
+### Fact sheets, written by Claude (PP-5)
+
+Ten minutes after each ingestion run, Vercel calls a second address,
+`/api/cron/fact-sheets` (also `npm run fact-sheets`; `npm run fact-sheets:due`
+only lists what is waiting and calls nothing). It looks for events whose
+stories have full copy from two or more outlets and sends up to three of them
+to **Claude**, Anthropic's AI (model `claude-opus-5-5`), with
+`src/lib/factSheets.js`. For each event Claude first says whether every story
+really reports the same event; any that do not are split off, and stories
+that report the same other event are moved together into one new event. From
+the rest it writes a neutral fact sheet: each fact with the
+outlets that report it, plus every point where the outlets disagree. The
+sheet goes in the private `fact_sheets` table. Stories with no full copy are
+left out, so nothing is written until an outlet's full copy is switched on.
+
+**Spending stops at $50 a month.** Every call is booked in the private
+`ai_spend` table before it is made, at the most it could cost, and the step
+stops, saying so, when the month (UTC) would pass $50. A typical sheet costs
+around ten cents. An event is sent again only when a new story has joined
+it: a story whose copy expires after 30 days is not a change, and a stored
+sheet is never replaced by one written from fewer stories. A call that gets
+no answer (too slow, connection lost) counts at its most-it-could-cost
+figure and is tried at most twice for the same stories, then the event waits
+for a new story. Claude's reply is streamed (sent piece by piece as it is
+written), each call is stopped after 200 seconds, and a new call starts only
+if a whole one still fits in the run's 270 seconds, so Vercel's 300-second
+limit never cuts a run off mid-call. Because the address spends money, it
+refuses to run at all when `CRON_SECRET` is not set.
+Without `ANTHROPIC_API_KEY` the step does not run and says so.
+
 ---
 
 ## 2. The database
@@ -167,10 +197,12 @@ columns).
 | `story_bodies` | **Private.** The full text of a story, from outlets that allow it: how it was fetched (`feed` or `page`), the outlet, and when. Deleted after 30 days, and with its story. | Written by ingestion only for feeds with full copy on (none yet). |
 | `events` | **Private.** One row per news event: stories from different outlets about the same thing share one event, so one fact sheet can be written per event. Its key is the first story's guid. | **Yes.** Ingestion writes it every run (`src/lib/events.js`). |
 | `story_events` | **Private.** Which event each story belongs to, one row per story, and who placed it (`rule` for ingestion's word rule, `check` for a later move). Deleted with its story. | **Yes.** Ingestion writes it every run; the fact-sheet step's check (PP-5) can move a story to another event (`moveStory`), and ingestion never undoes that. |
+| `fact_sheets` | **Private.** One neutral fact sheet per event, written by Claude from the full copy of every outlet in it: what happened, the facts with the outlets behind each, and where outlets disagree. | Written by the fact-sheet step (`src/lib/factSheets.js`) once an outlet's full copy is on and `ANTHROPIC_API_KEY` is set. |
+| `ai_spend` | **Private.** One row per call to Claude: what it was booked at beforehand, what it really cost, and how it ended. The $50-a-month cap is counted from it. | Same as `fact_sheets`. |
 
 (The ticket for this overview listed five tables; the schema had six, with
 `prediction_picks` the sixth. `story_bodies` made seven on 9 November 2026; `events` and `story_events`
-made nine the same day.)
+made nine the same day; `fact_sheets` and `ai_spend` made eleven.)
 
 **Row Level Security** (database rules about who may read or change which
 rows) is switched on for every table: anyone may read stories, published
@@ -251,7 +283,7 @@ All of these are listed in `package.json`.
 Settings that differ per computer, including passwords, are kept out of the
 code in **environment variables**. `.env.example` lists them with placeholder
 values; a real copy, `.env.local`, is never committed (the repository is
-public). The four names:
+public). The five names:
 
 | Name | What it is |
 |---|---|
@@ -259,6 +291,7 @@ public). The four names:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase's public "visitor" key, meant for code running in a visitor's browser. |
 | `SUPABASE_SERVICE_ROLE_KEY` | The database's **master key**: server only, never shown to a browser. `src/lib/supabaseAdmin.js` uses it to connect. |
 | `CRON_SECRET` | The password the 20-minute cron job sends. |
+| `ANTHROPIC_API_KEY` | The key that lets the server call Claude for fact sheets. Server only, secret. |
 
 `.env.example` also warns against putting a comment on the same line as a
 value: Vercel's settings screen keeps the comment as part of the value, which
