@@ -44,7 +44,7 @@
  *   Denies Request to Throw Out Lindsay Clancy's Murder Charges" stay apart,
  *   because a plain rule cannot tell that swap from "tariffs" /
  *   "immigration". A missed merge costs a second fact sheet; a wrong merge
- *   never undoes itself.
+ *   mixes two stories until it is caught (see THE RULE IS A FIRST PASS).
  * Key words are the words left after dropping common words ("the", "says",
  * "after"...), lower-cased, with a plain plural "s" taken off.
  *
@@ -59,9 +59,19 @@
  * that started it, so a run repeated after a half-failed write lands on the
  * same keys, and nothing is ever duplicated.
  *
+ * THE RULE IS A FIRST PASS (Dane's choice "A" on PP-4, 2026-11-09): some
+ * different events still group, because words alone cannot tell them apart
+ * ("Putin says Russia will respond to sanctions" / "Putin says Russia will
+ * host Xi"). Before writing an event's fact sheet, PP-5's AI confirms its
+ * stories really are one event and splits off any that are not, with
+ * `moveStory`. Each link says who placed it (`linked_by`): "rule" for this
+ * module's grouping, "check" for a move. Ingestion never re-places a linked
+ * story, so a moved story stays where the check put it.
+ *
  * KNOWN LIMIT (for PP-5): if the events write works and the links write then
  * fails, the next run may place those stories differently, leaving an event
- * row with no stories. PP-5 should skip events that have no stories.
+ * row with no stories. A story moved out of an event can leave it empty the
+ * same way. PP-5 should skip events that have no stories.
  */
 import { cleanText } from "./text.js";
 import { GUID_BATCH } from "./ingest.js";
@@ -375,5 +385,56 @@ export async function linkEvents(supabase, { now = Date.now() } = {}) {
     return res;
   } catch (err) {
     return fail("step", err);
+  }
+}
+
+/** The key of the event a story split out of its event gets. */
+export const splitKey = (storyGuid) => `split:${storyGuid}`;
+
+/**
+ * Change a story's event, for PP-5's check (see THE RULE IS A FIRST PASS).
+ * `toEvent`: the key of an existing event to move it into. Left out, the
+ * story is split off into an event of its own, keyed `splitKey(guid)`
+ * (written if it is not there yet), so a repeated split lands on the same key.
+ * The write is guarded on the story's current event and read back, so a
+ * story moved underneath this call is reported, not overwritten.
+ * Never throws. Returns { moved, from, to, error }: `moved` false with no
+ * error means the story was already there.
+ */
+export async function moveStory(supabase, storyGuid, { toEvent } = {}) {
+  const res = { moved: false, from: null, to: null, error: null };
+  const fail = (msg) => { res.error = `events move ${storyGuid}: ${msg}`; return res; };
+  try {
+    const cur = await supabase.from("story_events").select("event_key").eq("story_guid", storyGuid).maybeSingle();
+    if (cur.error) return fail(`read link: ${cur.error.message}`);
+    if (!cur.data) return fail("the story has no event yet");
+    res.from = cur.data.event_key;
+    res.to = toEvent || splitKey(storyGuid);
+    if (res.to === res.from) return res;
+
+    if (toEvent) {
+      const ev = await supabase.from("events").select("key").eq("key", toEvent).maybeSingle();
+      if (ev.error) return fail(`read event: ${ev.error.message}`);
+      if (!ev.data) return fail(`no event with key ${toEvent}`);
+    } else {
+      const st = await supabase.from("stories").select("published_at").eq("guid", storyGuid).maybeSingle();
+      if (st.error) return fail(`read story: ${st.error.message}`);
+      if (!st.data) return fail("no such story");
+      const up = await supabase.from("events").upsert([{ key: res.to, first_published_at: st.data.published_at }], { onConflict: "key", ignoreDuplicates: true });
+      if (up.error) return fail(`write event: ${up.error.message}`);
+    }
+
+    const w = await supabase.from("story_events")
+      .update({ event_key: res.to, linked_by: "check", linked_at: new Date().toISOString() })
+      .eq("story_guid", storyGuid).eq("event_key", res.from)
+      .select("story_guid,event_key");
+    if (w.error) return fail(`write link: ${w.error.message}`);
+    if (!w.data || w.data.length !== 1 || w.data[0].event_key !== res.to) {
+      return fail(`the link did not change (its event moved from ${res.from} underneath this call)`);
+    }
+    res.moved = true;
+    return res;
+  } catch (err) {
+    return fail(err.message);
   }
 }

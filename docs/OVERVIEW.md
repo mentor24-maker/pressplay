@@ -166,7 +166,7 @@ columns).
 | `prediction_picks` | Each player's pick on a prediction, and the points awarded. One pick per player per prediction. | No. |
 | `story_bodies` | **Private.** The full text of a story, from outlets that allow it: how it was fetched (`feed` or `page`), the outlet, and when. Deleted after 30 days, and with its story. | Written by ingestion only for feeds with full copy on (none yet). |
 | `events` | **Private.** One row per news event: stories from different outlets about the same thing share one event, so one fact sheet can be written per event. Its key is the first story's guid. | **Yes.** Ingestion writes it every run (`src/lib/events.js`). |
-| `story_events` | **Private.** Which event each story belongs to, one row per story. Deleted with its story. | **Yes.** Ingestion writes it every run. |
+| `story_events` | **Private.** Which event each story belongs to, one row per story, and who placed it (`rule` for ingestion's word rule, `check` for a later move). Deleted with its story. | **Yes.** Ingestion writes it every run; the fact-sheet step's check (PP-5) can move a story to another event (`moveStory`), and ingestion never undoes that. |
 
 (The ticket for this overview listed five tables; the schema had six, with
 `prediction_picks` the sixth. `story_bodies` made seven on 9 November 2026; `events` and `story_events`

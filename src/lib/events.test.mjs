@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { keyWords, sameEvent, assignEvents, countEvents, linkEvents, isTitleCase, LINK_BATCH, PAGE_ROWS } from "./events.js";
+import { keyWords, sameEvent, assignEvents, countEvents, linkEvents, moveStory, splitKey, isTitleCase, LINK_BATCH, PAGE_ROWS } from "./events.js";
 import { GUID_BATCH } from "./ingest.js";
 
 const NOW = Date.parse("2026-11-09T18:00:00Z");
@@ -94,7 +94,7 @@ test("a story already linked keeps its event and a new story joins it", () => {
 
 /** A stand-in for the Supabase client that keeps rows like the real tables would. */
 function fakeSupabase({ stories = [], fail = {} } = {}) {
-  const db = { events: new Map(), story_events: new Map() };
+  const db = { events: new Map(), story_events: new Map(), linkedBy: new Map() };
   const calls = [];
   const err = (k) => (fail[k] ? { error: { message: "boom" } } : null);
   const from = (table) => ({
@@ -103,6 +103,12 @@ function fakeSupabase({ stories = [], fail = {} } = {}) {
         const q = { since: null };
         const chain = {
           gte: (_c, v) => { q.since = v; return chain; },
+          eq: (_c, v) => ({ maybeSingle: async () => {
+            calls.push({ table, op: "select", eq: v });
+            if (err("stories:select")) return err("stories:select");
+            const st = stories.find((x) => x.guid === v);
+            return { data: st ? { published_at: st.published_at } : null, error: null };
+          } }),
           order: () => chain,
           range: async (lo, hi) => {
             calls.push({ table, op: "select", lo, hi });
@@ -114,11 +120,37 @@ function fakeSupabase({ stories = [], fail = {} } = {}) {
         };
         return chain;
       }
-      return { in: async (_c, vals) => {
-        calls.push({ table, op: "select", vals });
-        if (err(`${table}:select`)) return err(`${table}:select`);
-        return { data: vals.filter((g) => db.story_events.has(g)).map((g) => ({ story_guid: g, event_key: db.story_events.get(g) })), error: null };
-      } };
+      return {
+        in: async (_c, vals) => {
+          calls.push({ table, op: "select", vals });
+          if (err(`${table}:select`)) return err(`${table}:select`);
+          return { data: vals.filter((g) => db.story_events.has(g)).map((g) => ({ story_guid: g, event_key: db.story_events.get(g) })), error: null };
+        },
+        // One row by its key: story_events by story_guid, events by key.
+        eq: (_c, v) => ({ maybeSingle: async () => {
+          calls.push({ table, op: "select", eq: v });
+          if (err(`${table}:select`)) return err(`${table}:select`);
+          if (table === "events") return { data: db.events.has(v) ? { key: v } : null, error: null };
+          return { data: db.story_events.has(v) ? { event_key: db.story_events.get(v) } : null, error: null };
+        } }),
+      };
+    },
+    // story_events only: update(...).eq(story_guid).eq(event_key).select(), guarded like the real filter.
+    update: (patch) => {
+      const where = {};
+      const chain = {
+        eq: (c, v) => { where[c] = v; return chain; },
+        select: async () => {
+          calls.push({ table, op: "update", patch, where });
+          if (err(`${table}:update`)) return err(`${table}:update`);
+          if (fail.moveUnderneath) db.story_events.set(where.story_guid, "someone-else");
+          if (db.story_events.get(where.story_guid) !== where.event_key) return { data: [], error: null };
+          db.story_events.set(where.story_guid, patch.event_key);
+          db.linkedBy.set(where.story_guid, patch.linked_by);
+          return { data: [{ story_guid: where.story_guid, event_key: patch.event_key }], error: null };
+        },
+      };
+      return chain;
     },
     upsert: async (rows, opts) => {
       calls.push({ table, op: "upsert", rows, opts });
@@ -347,4 +379,74 @@ test("a chain of near matches does not pull two unrelated stories into one event
 
 test("the link lookups use ingest's batch size", () => {
   assert.equal(LINK_BATCH, GUID_BATCH);
+});
+
+// PP-4, Dane's choice "A": the rule is a first pass, and PP-5's check can change a story's event later.
+const MERGED = [
+  story("Putin says Russia will respond to new EU sanctions", "The Russian president spoke at a Kremlin meeting on Monday."),
+  story("Putin says Russia will host Chinese leader Xi next month", "The Russian president spoke at a Kremlin briefing on Monday."),
+];
+
+test("a story wrongly grouped can be split off into an event of its own, and ingestion leaves it there", async () => {
+  const [a, b] = MERGED;
+  const sb = fakeSupabase({ stories: MERGED });
+  sb.db.events.set(a.guid, { key: a.guid });
+  sb.db.story_events.set(a.guid, a.guid);
+  sb.db.story_events.set(b.guid, a.guid); // the word rule put both in one event
+
+  const res = await moveStory(sb, b.guid);
+  assert.deepEqual(res, { moved: true, from: a.guid, to: splitKey(b.guid), error: null });
+  assert.equal(sb.db.story_events.get(b.guid), `split:${b.guid}`);
+  assert.equal(sb.db.events.get(`split:${b.guid}`).first_published_at, b.published_at, "the new event is written");
+  assert.equal(sb.db.linkedBy.get(b.guid), "check", "the link says the check placed it");
+  assert.equal(sb.db.story_events.get(a.guid), a.guid, "the other story keeps its event");
+
+  const before = sb.calls.length;
+  const again = await linkEvents(sb, { now: NOW });
+  assert.equal(again.linked, 0);
+  assert.equal(sb.calls.slice(before).some((c) => c.op === "upsert" || c.op === "update"), false, "ingestion does not undo the move");
+  assert.equal(sb.db.story_events.get(b.guid), splitKey(b.guid));
+
+  const twice = await moveStory(sb, b.guid);
+  assert.deepEqual(twice, { moved: false, from: splitKey(b.guid), to: splitKey(b.guid), error: null }, "splitting again changes nothing");
+});
+
+test("a story can be moved into another event that already exists", async () => {
+  const [a, b] = SAME[0];
+  const sb = fakeSupabase({ stories: [a, b] });
+  for (const s of [a, b]) { sb.db.events.set(s.guid, { key: s.guid }); sb.db.story_events.set(s.guid, s.guid); } // the rule missed this pair
+  const res = await moveStory(sb, b.guid, { toEvent: a.guid });
+  assert.deepEqual(res, { moved: true, from: b.guid, to: a.guid, error: null });
+  assert.equal(sb.db.story_events.get(b.guid), a.guid);
+  assert.equal(sb.calls.some((c) => c.op === "upsert"), false, "no event written for a move into one that exists");
+});
+
+test("a move that cannot be made says why and changes nothing", async () => {
+  const [a, b] = MERGED;
+  const setup = (fail) => {
+    const sb = fakeSupabase({ stories: MERGED, fail });
+    sb.db.events.set(a.guid, { key: a.guid });
+    sb.db.story_events.set(a.guid, a.guid);
+    sb.db.story_events.set(b.guid, a.guid);
+    return sb;
+  };
+  const cases = [
+    [{}, "never-linked", {}, /the story has no event yet/],
+    [{}, b.guid, { toEvent: "no-such-event" }, /no event with key no-such-event/],
+    [{ "story_events:select": true }, b.guid, {}, /read link: boom/],
+    [{ "events:upsert": true }, b.guid, {}, /write event: boom/],
+    [{ "story_events:update": true }, b.guid, {}, /write link: boom/],
+  ];
+  for (const [fail, guid, opts, msg] of cases) {
+    const sb = setup(fail);
+    const res = await moveStory(sb, guid, opts);
+    assert.equal(res.moved, false);
+    assert.match(res.error, msg);
+    assert.equal(sb.db.story_events.get(b.guid), a.guid, "the link is unchanged");
+  }
+  const sb = setup({ moveUnderneath: true });
+  const res = await moveStory(sb, b.guid);
+  assert.equal(res.moved, false);
+  assert.match(res.error, /did not change/, "a story moved underneath the call is reported, not overwritten");
+  assert.equal(sb.db.story_events.get(b.guid), "someone-else");
 });

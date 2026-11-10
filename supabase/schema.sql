@@ -37,10 +37,12 @@ create index if not exists story_bodies_fetched_idx on story_bodies (fetched_at)
 -- from all its sources. Grouping is a plain word-matching rule run by the
 -- ingester (src/lib/events.js). An event's key is the guid of the story that
 -- started it, and a story keeps its event once linked, so re-running
--- ingestion never duplicates either table. Never shown on the site.
+-- ingestion never duplicates either table. The rule is a first pass: the
+-- fact-sheet step (PP-5) checks each event and can move a story to another
+-- event or split it off (moveStory). Never shown on the site.
 create table if not exists events (
   id                  bigint generated always as identity primary key,
-  key                 text not null unique,     -- guid of the story that started the event
+  key                 text not null unique,     -- guid of the story that started the event ('split:<guid>' for one split off later)
   first_published_at  timestamptz not null,
   created_at          timestamptz not null default now()
 );
@@ -50,6 +52,9 @@ create table if not exists events (
 create table if not exists story_events (
   story_guid  text primary key references stories(guid) on delete cascade,
   event_key   text not null references events(key) on delete cascade,
+  -- who placed it: 'rule' = ingestion's word rule; 'check' = moved later by
+  -- the fact-sheet step's check (moveStory), which ingestion never undoes
+  linked_by   text not null default 'rule' check (linked_by in ('rule','check')),
   linked_at   timestamptz not null default now()
 );
 create index if not exists story_events_event_idx on story_events (event_key);

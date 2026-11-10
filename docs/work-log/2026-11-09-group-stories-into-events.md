@@ -60,3 +60,23 @@ out") are now kept apart, because a plain rule cannot tell that swap from
 match is permanent and would mix two different stories into one fact sheet, so
 missing is the safer mistake. The five review cases and six more of the same
 shape are now permanent tests.
+
+**Fourth round, Dane's decision.** Review found more different events that
+still group: a leader and their own country ("Putin says Russia will respond
+to sanctions" / "Putin says Russia will host Xi"), or a CEO and their company.
+It measured today's news and showed that no word-counting rule can keep these
+apart without also splitting real groups. So it asked Dane, and he chose
+option A: keep the word rule as a quick first sort, and let the AI in the next
+step (PP-5) check each group before writing its fact sheet, splitting off any
+story that does not belong.
+
+For that, a story's group can now be changed after the fact. A new function,
+`moveStory`, moves a story into another group, or splits it into a group of its
+own. It checks that nothing else moved the story first, and reads the change
+back, so it never overwrites someone else's move. Each story's link now also
+records who placed it: the word rule, or the check. Ingestion never re-sorts a
+story that already has a group, so a story the check moved stays moved. Three
+new tests cover a split, a move into another group, and every way a move can
+fail, and the database file was run in a throwaway Postgres to confirm the new
+column and the guarded move work there.
+
