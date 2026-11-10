@@ -32,6 +32,33 @@ create table if not exists story_bodies (
 );
 create index if not exists story_bodies_fetched_idx on story_bodies (fetched_at);
 
+-- Events, PRIVATE (PP-4). Stories from different outlets about the same news
+-- event share one event, so the next step can write one fact sheet per event
+-- from all its sources. Grouping is a plain word-matching rule run by the
+-- ingester (src/lib/events.js). An event's key is the guid of the story that
+-- started it, and a story keeps its event once linked, so re-running
+-- ingestion never duplicates either table. The rule is a first pass: the
+-- fact-sheet step (PP-5) checks each event and can move a story to another
+-- event or split it off (moveStory). Never shown on the site.
+create table if not exists events (
+  id                  bigint generated always as identity primary key,
+  key                 text not null unique,     -- guid of the story that started the event ('split:<guid>' for one split off later)
+  first_published_at  timestamptz not null,
+  created_at          timestamptz not null default now()
+);
+
+-- Each story's event: one row per story, kept apart from the public
+-- `stories` table so the link stays private too.
+create table if not exists story_events (
+  story_guid  text primary key references stories(guid) on delete cascade,
+  event_key   text not null references events(key) on delete cascade,
+  -- who placed it: 'rule' = ingestion's word rule; 'check' = moved later by
+  -- the fact-sheet step's check (moveStory), which ingestion never undoes
+  linked_by   text not null default 'rule' check (linked_by in ('rule','check')),
+  linked_at   timestamptz not null default now()
+);
+create index if not exists story_events_event_idx on story_events (event_key);
+
 -- Games are AI-drafted, human-approved. Nothing publishes from status='draft'.
 create table if not exists games (
   id            bigint generated always as identity primary key,
@@ -119,5 +146,11 @@ drop policy if exists "read own picks" on prediction_picks;
 create policy "read own picks"   on prediction_picks for select using (auth.uid() = profile_id);
 drop policy if exists "insert own picks" on prediction_picks;
 create policy "insert own picks" on prediction_picks for insert with check (auth.uid() = profile_id);
+
+-- events and story_events: private like story_bodies (RLS on, no policy, no grants).
+alter table events enable row level security;
+revoke all on events from anon, authenticated;
+alter table story_events enable row level security;
+revoke all on story_events from anon, authenticated;
 
 -- Service-role key (used by the ingester and editorial tools) bypasses RLS.
