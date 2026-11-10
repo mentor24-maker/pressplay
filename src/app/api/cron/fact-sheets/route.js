@@ -4,7 +4,7 @@
  * This step spends money, so it REFUSES to run when CRON_SECRET is not set
  * (unlike /api/cron/ingest, which lets anyone run it then).
  * Writes up to MAX_EVENTS_PER_RUN fact sheets with Claude, inside the
- * $50-a-month cap, starting a call only while a whole one still fits in the
+ * $10-a-month cap, starting a call only while a whole one still fits in the
  * run (RUN_BUDGET_MS, inside maxDuration below). Answers with counts and
  * dollars only, never text.
  */

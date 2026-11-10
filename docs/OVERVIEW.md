@@ -152,7 +152,7 @@ Ten minutes after each ingestion run, Vercel calls a second address,
 `/api/cron/fact-sheets` (also `npm run fact-sheets`; `npm run fact-sheets:due`
 only lists what is waiting and calls nothing). It looks for events whose
 stories have full copy from two or more outlets and sends up to three of them
-to **Claude**, Anthropic's AI (model `claude-opus-5-5`), with
+to **Claude**, Anthropic's AI (model `claude-haiku-5-5`, its cheapest), with
 `src/lib/factSheets.js`. For each event Claude first says whether every story
 really reports the same event; any that do not are split off, and stories
 that report the same other event are moved together into one new event. From
@@ -161,10 +161,15 @@ outlets that report it, plus every point where the outlets disagree. The
 sheet goes in the private `fact_sheets` table. Stories with no full copy are
 left out, so nothing is written until an outlet's full copy is switched on.
 
-**Spending stops at $50 a month.** Every call is booked in the private
+**Spending stops at $10 a month.** Every call is booked in the private
 `ai_spend` table before it is made, at the most it could cost, and the step
-stops, saying so, when the month (UTC) would pass $50. A typical sheet costs
-around ten cents. An event is sent again only when a new story has joined
+stops, saying so, when the month (UTC) would pass $10. A typical sheet costs
+roughly a quarter of a cent (around 10,000 tokens in and 3,000 out, at $0.10
+and $0.50 per million; a rough figure, since the model's thinking counts as
+output and varies), so $10 covers thousands. A call whose prompt is over
+100,000 tokens pays five times that rate, and the count knows it: any event
+long enough that it could cross that line is booked at the higher rate; the
+longest event allowed costs at most about 12 cents. An event is sent again only when a new story has joined
 it: a story whose copy expires after 30 days is not a change, and a stored
 sheet is never replaced by one written from fewer stories. A call that gets
 no answer (too slow, connection lost) counts at its most-it-could-cost
@@ -198,7 +203,7 @@ columns).
 | `events` | **Private.** One row per news event: stories from different outlets about the same thing share one event, so one fact sheet can be written per event. Its key is the first story's guid. | **Yes.** Ingestion writes it every run (`src/lib/events.js`). |
 | `story_events` | **Private.** Which event each story belongs to, one row per story, and who placed it (`rule` for ingestion's word rule, `check` for a later move). Deleted with its story. | **Yes.** Ingestion writes it every run; the fact-sheet step's check (PP-5) can move a story to another event (`moveStory`), and ingestion never undoes that. |
 | `fact_sheets` | **Private.** One neutral fact sheet per event, written by Claude from the full copy of every outlet in it: what happened, the facts with the outlets behind each, and where outlets disagree. | Written by the fact-sheet step (`src/lib/factSheets.js`) once an outlet's full copy is on and `ANTHROPIC_API_KEY` is set. |
-| `ai_spend` | **Private.** One row per call to Claude: what it was booked at beforehand, what it really cost, and how it ended. The $50-a-month cap is counted from it. | Same as `fact_sheets`. |
+| `ai_spend` | **Private.** One row per call to Claude: what it was booked at beforehand, what it really cost, and how it ended. The $10-a-month cap is counted from it. | Same as `fact_sheets`. |
 
 (The ticket for this overview listed five tables; the schema had six, with
 `prediction_picks` the sixth. `story_bodies` made seven on 9 November 2026; `events` and `story_events`

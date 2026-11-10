@@ -18,7 +18,7 @@ scripts/ingest.mjs               CLI: npm run ingest | ingest:dry | ingest:local
 scripts/sample/sample-feed.xml   Offline test fixture
 src/app/page.jsx                 Homepage: top 20 stories by attention
 src/app/api/cron/ingest/route.js Vercel Cron endpoint (every 20 min)
-src/lib/factSheets.js            Claude writes a private neutral fact sheet per event ($50/month cap)
+src/lib/factSheets.js            Claude writes a private neutral fact sheet per event ($10/month cap)
 src/app/api/cron/fact-sheets/    Vercel Cron endpoint for fact sheets (10 min after each ingest)
 scripts/fact-sheets.mjs          CLI: npm run fact-sheets | fact-sheets:due
 supabase/schema.sql              stories, games, profiles, plays, predictions + RLS

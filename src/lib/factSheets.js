@@ -19,7 +19,7 @@
  * the sheet is written from the rest. A split story is marked
  * linked_by = 'check', and ingestion never puts it back.
  *
- * THE $50 CAP (MONTHLY_CAP_USD): every call is booked in the PRIVATE
+ * THE $10 CAP (MONTHLY_CAP_USD): every call is booked in the PRIVATE
  * `ai_spend` table BEFORE it is made, at its worst possible cost (the input
  * counted generously, plus every output token it is allowed). The month's
  * total is then read back, the new booking included: if it is over the cap,
@@ -52,10 +52,18 @@ import Anthropic from "@anthropic-ai/sdk";
 import { moveStory } from "./events.js";
 import { GUID_BATCH } from "./ingest.js";
 
-export const MODEL = "claude-opus-5-5";
-/** US dollars per million tokens, Anthropic's list price for MODEL (checked 2026-11). */
-export const PRICE_PER_MTOK = { input: 4, output: 20 };
-export const MONTHLY_CAP_USD = 50;
+/** The cheapest current Claude model (PP-7), per https://platform.claude.com/docs/en/about-claude/models/overview, checked 2026-11-10. */
+export const MODEL = "claude-haiku-5-5";
+/**
+ * US dollars per million tokens, Anthropic's list price for MODEL, from
+ * https://platform.claude.com/docs/en/about-claude/pricing, checked 2026-11-10.
+ * Haiku 5.5 has two prices: a request whose prompt (every input token, cache
+ * reads and writes included) is over LONG_PROMPT_TOKENS pays `long` for the
+ * WHOLE request, output included.
+ */
+export const PRICE_PER_MTOK = { input: 0.1, output: 0.5, long: { input: 0.5, output: 2.5 } };
+export const LONG_PROMPT_TOKENS = 100_000;
+export const MONTHLY_CAP_USD = 10;
 /** Most output tokens (thinking included) one fact sheet may use; part of every booking. */
 export const MAX_OUTPUT_TOKENS = 16000;
 /** An event with more article text than this is skipped, never cut short. */
@@ -81,17 +89,28 @@ export const monthOf = (now) => new Date(now).toISOString().slice(0, 7);
 /** What a call cost, in dollars, from its reported token counts. */
 export function costOf(usage = {}) {
   const input = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
-  return (input * PRICE_PER_MTOK.input + (usage.output_tokens || 0) * PRICE_PER_MTOK.output) / 1e6;
+  return priced(input, usage.output_tokens || 0);
+}
+
+/** Dollars for a request with these token counts, at the price its prompt length is billed at. */
+function priced(inputTokens, outputTokens) {
+  const p = inputTokens > LONG_PROMPT_TOKENS ? PRICE_PER_MTOK.long : PRICE_PER_MTOK;
+  return (inputTokens * p.input + outputTokens * p.output) / 1e6;
 }
 
 /**
- * The most a call can cost: input counted at one token per 3 characters (real
- * English text runs nearer 4), plus room for the instructions, plus every
- * output token allowed.
+ * The most a call can cost: input counted at one token per character (the
+ * current tokenizer averages about 2.5 characters per token, and text dense
+ * in numbers, tables or non-English copy runs lower, but news text does not
+ * go under one), plus room for the instructions, plus every output token
+ * allowed, at the price that count is billed at. Counting this high matters
+ * at LONG_PROMPT_TOKENS: over it the WHOLE request costs five times as much,
+ * so a booking that guessed a prompt just under the line would not be the
+ * worst case. Bookings settle to the real cost afterwards, so the margin
+ * costs nothing.
  */
 export function worstCaseCost(inputChars) {
-  const inputTokens = Math.ceil(inputChars / 3) + 2000;
-  return (inputTokens * PRICE_PER_MTOK.input + MAX_OUTPUT_TOKENS * PRICE_PER_MTOK.output) / 1e6;
+  return priced(inputChars + 2000, MAX_OUTPUT_TOKENS);
 }
 
 /** A short fingerprint of a set of story guids, order ignored. */

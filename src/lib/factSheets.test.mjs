@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   writeFactSheets, eventsDue, readAnswer, spentThisMonth, costOf, worstCaseCost, reportLine, storySet, monthOf, buildPrompt,
-  MONTHLY_CAP_USD, MAX_INPUT_CHARS, MODEL, SCHEMA, MAX_UNFINISHED_TRIES, CALL_LIMIT_MS, RUN_BUDGET_MS,
+  MONTHLY_CAP_USD, MAX_INPUT_CHARS, MAX_OUTPUT_TOKENS, LONG_PROMPT_TOKENS, MODEL, SCHEMA, MAX_UNFINISHED_TRIES, CALL_LIMIT_MS, RUN_BUDGET_MS,
 } from "./factSheets.js";
 
 const NOW = Date.parse("2026-11-09T18:00:00Z");
@@ -243,17 +243,28 @@ test("when the check leaves only one outlet, no sheet is written and the event i
   assert.equal(claude.requests.length, 1);
 });
 
-test("the cap: no call is made once the month's spend has reached $50, and the step says so", async () => {
+test("the cap: no call is made once the month's spend has reached $10, and the step says so", async () => {
   const s = seed();
-  s.ai_spend = [{ id: 900, month: "2026-11", purpose: "fact_sheet", model: MODEL, reserved_usd: "1.000000", cost_usd: "49.990000", outcome: "written" }];
+  s.ai_spend = [{ id: 900, month: "2026-11", purpose: "fact_sheet", model: MODEL, reserved_usd: "1.000000", cost_usd: "10.000000", outcome: "written" }];
   const db = fakeDb(s);
   const claude = fakeClaude();
   const r = await writeFactSheets(db, { client: claude, now: NOW });
   assert.equal(claude.requests.length, 0, "Claude was not called");
-  assert.deepEqual(r.capped, { month: "2026-11", spent: 49.99, cap: MONTHLY_CAP_USD });
+  assert.deepEqual(r.capped, { month: "2026-11", spent: 10, cap: MONTHLY_CAP_USD });
   assert.equal(db.t.ai_spend.at(-1).outcome, "over_cap");
   assert.equal(db.t.ai_spend.at(-1).cost_usd, 0, "the cancelled booking no longer counts");
-  assert.match(reportLine(r), /STOPPED: the monthly cap is reached \(\$49\.99 of \$50\.00 in 2026-11\)/);
+  assert.match(reportLine(r), /STOPPED: the monthly cap is reached \(\$10\.00 of \$10\.00 in 2026-11\)/);
+});
+
+test("the cap: with $9.99 spent, a call whose worst case still fits under $10 is made, and the month stays under $10", async () => {
+  const s = seed();
+  s.ai_spend = [{ id: 900, month: "2026-11", purpose: "fact_sheet", model: MODEL, reserved_usd: "1.000000", cost_usd: "9.990000", outcome: "written" }];
+  const db = fakeDb(s);
+  const claude = fakeClaude();
+  const r = await writeFactSheets(db, { client: claude, now: NOW });
+  assert.equal(claude.requests.length, 1, "a call under a cent fits in the cent that is left");
+  assert.equal(r.written, 1);
+  assert.ok(await spentThisMonth(db, NOW) <= MONTHLY_CAP_USD);
 });
 
 test("the cap counts last month's spend separately, and a booking that never settled counts at its worst case", async () => {
@@ -292,6 +303,23 @@ test("every booking is the worst case, so a call can never cost more than it boo
   const chars = 40000;
   const realistic = costOf({ input_tokens: Math.ceil(chars / 4) + 1500, output_tokens: 16000 });
   assert.ok(worstCaseCost(chars) >= realistic);
+});
+
+test("the worst case of the longest event allowed covers a prompt billed at the higher price (over 100,000 tokens)", () => {
+  const realistic = costOf({ input_tokens: Math.ceil(MAX_INPUT_CHARS / 2.5) + 1500, output_tokens: MAX_OUTPUT_TOKENS });
+  assert.ok(Math.ceil(MAX_INPUT_CHARS / 2.5) + 1500 > LONG_PROMPT_TOKENS, "this prompt is over the line");
+  assert.ok(worstCaseCost(MAX_INPUT_CHARS) >= realistic);
+});
+
+test("an event estimated just under 100,000 tokens is booked at the higher price, so a bill just over the line is still covered", () => {
+  const chars = 196_000; // at an average 2 characters per token this is 100,000 tokens: under the line
+  const billed = costOf({ input_tokens: LONG_PROMPT_TOKENS + 1, output_tokens: MAX_OUTPUT_TOKENS });
+  assert.ok(worstCaseCost(chars) >= billed, `booked ${worstCaseCost(chars)}, billed ${billed}`);
+});
+
+test("a small event is still booked at the cheap rate", () => {
+  assert.equal(worstCaseCost(5000), costOf({ input_tokens: 5000 + 2000, output_tokens: MAX_OUTPUT_TOKENS }));
+  assert.ok(worstCaseCost(5000) < 0.01);
 });
 
 test("an answer that names a story outside the event, or misses one, is refused and nothing is stored", async () => {
@@ -500,7 +528,11 @@ test("article text and the facts never appear in the result, the report or the e
 
 test("helpers: month, cost, fingerprint, prompt", () => {
   assert.equal(monthOf(Date.parse("2026-12-01T03:00:00Z")), "2026-12");
-  assert.equal(costOf({ input_tokens: 1e6, output_tokens: 1e6 }), 24);
+  assert.equal(MODEL, "claude-haiku-5-5");
+  assert.equal(MONTHLY_CAP_USD, 10);
+  assert.equal(costOf({ input_tokens: 100000, output_tokens: 100000 }), 0.06, "at or under 100,000 prompt tokens: $0.10 / $0.50");
+  assert.equal(costOf({ input_tokens: 1e6, output_tokens: 1e6 }), 3, "over 100,000 prompt tokens: $0.50 / $2.50 for the whole request");
+  assert.equal(costOf({ input_tokens: 60000, cache_read_input_tokens: 50000, output_tokens: 0 }), 0.055, "cache reads count toward the prompt's length");
   assert.equal(storySet(["b", "a"]), storySet(["a", "b"]));
   assert.match(buildPrompt([{ source: "NPR", title: "T", published_at: "p", body: "B" }]), /<article id="S1">\nOutlet: NPR\nHeadline: T/);
   assert.equal(readAnswer(GOOD, seed().stories.map((s) => ({ ...s, body: "" }))).ok, true);
