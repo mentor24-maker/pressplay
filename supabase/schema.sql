@@ -59,6 +59,46 @@ create table if not exists story_events (
 );
 create index if not exists story_events_event_idx on story_events (event_key);
 
+-- Fact sheets, PRIVATE (PP-5). One per event, written by Claude from the full
+-- copy (story_bodies) of every outlet in the event (src/lib/factSheets.js):
+-- neutral facts, each naming the outlets that report it, and the points where
+-- outlets disagree. The input for drafting games. Never shown on the site.
+create table if not exists fact_sheets (
+  event_key      text primary key references events(key) on delete cascade,
+  event          text  not null,               -- one neutral sentence: what happened
+  facts          jsonb not null,               -- [{fact, sources: [{source, guid}]}]
+  disagreements  jsonb not null default '[]',  -- [{about, accounts: [{claim, sources: [{source, guid}]}]}]
+  story_guids    text[] not null,              -- the stories it was written from
+  sources        text[] not null,              -- their outlets
+  story_set      text  not null,               -- fingerprint of story_guids, to tell when the event has changed
+  model          text  not null,
+  cost_usd       numeric(10,6) not null default 0,
+  written_at     timestamptz not null default now()
+);
+
+-- AI spending, PRIVATE (PP-5). Every call to Claude is booked here BEFORE it
+-- is made, at its worst possible cost (reserved_usd); when the reply comes
+-- back, cost_usd holds what it really cost. A month's spend is each row's
+-- cost_usd, or its reserved_usd while cost_usd is empty. The fact-sheet step
+-- stops when that passes $50 for the month (UTC).
+create table if not exists ai_spend (
+  id             bigint generated always as identity primary key,
+  month          text not null,                -- 'YYYY-MM', UTC
+  purpose        text not null,                -- 'fact_sheet'
+  event_key      text,
+  story_set      text,
+  model          text not null,
+  reserved_usd   numeric(10,6) not null,
+  cost_usd       numeric(10,6),
+  input_tokens   int,
+  output_tokens  int,
+  -- booked | written | no_sheet | invalid | write_failed | api_error | over_cap
+  outcome        text not null default 'booked',
+  created_at     timestamptz not null default now()
+);
+create index if not exists ai_spend_month_idx on ai_spend (month);
+create index if not exists ai_spend_event_idx on ai_spend (event_key);
+
 -- Games are AI-drafted, human-approved. Nothing publishes from status='draft'.
 create table if not exists games (
   id            bigint generated always as identity primary key,
@@ -152,5 +192,11 @@ alter table events enable row level security;
 revoke all on events from anon, authenticated;
 alter table story_events enable row level security;
 revoke all on story_events from anon, authenticated;
+
+-- fact_sheets and ai_spend: private the same way.
+alter table fact_sheets enable row level security;
+revoke all on fact_sheets from anon, authenticated;
+alter table ai_spend enable row level security;
+revoke all on ai_spend from anon, authenticated;
 
 -- Service-role key (used by the ingester and editorial tools) bypasses RLS.

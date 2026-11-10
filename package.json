@@ -11,12 +11,15 @@
     "ingest": "node --env-file-if-exists=.env.local scripts/ingest.mjs",
     "ingest:dry": "node --env-file-if-exists=.env.local scripts/ingest.mjs --dry",
     "ingest:local": "node --env-file-if-exists=.env.local scripts/ingest.mjs --local",
+    "fact-sheets": "node --env-file-if-exists=.env.local scripts/fact-sheets.mjs",
+    "fact-sheets:due": "node --env-file-if-exists=.env.local scripts/fact-sheets.mjs --due",
     "clickup": "node loop/scripts/with_doppler.mjs node loop/scripts/clickup.mjs",
     "doctor": "node loop/scripts/doctor.mjs",
     "test:app": "node --test \"src/**/*.test.mjs\"",
     "test:loop": "node --test \"loop/**/*.test.js\" \"loop/**/*.test.mjs\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0",
     "@supabase/supabase-js": "^2.45.0",
     "next": "^16.2.12",
     "react": "^19.2.8",
