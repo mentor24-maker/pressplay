@@ -25,6 +25,26 @@
  *   hears several cases a day. With only an institution in common, the
  *   headlines must also share MIN_TOPIC_WORDS words that say what happened
  *   (not "hears", "case", "ruling", ...).
+ * - the headlines are not one pattern with a word swapped (`swappedSlot`):
+ *   "Trump signs executive order on tariffs" / "... on immigration",
+ *   "Senate passes defense spending bill" / "... farm spending bill". When
+ *   most of the headline is the same words in the same order (at least
+ *   TEMPLATE_SHARE of the longer headline), and between the same shared words
+ *   each headline has its own word the other story never uses, the swapped
+ *   word is what happened, and the stories are different events. Two outlets
+ *   writing up one event word for word do not swap in a word of their own;
+ *   when they write it up their own way, little of the order is shared.
+ *   Exception: headlines that share two different names (France and Iran,
+ *   Nvidia and Jensen Huang) have pinned down who twice over, and a swap
+ *   there is only wording ("hacking" / "cyber attacks"). Name words side by
+ *   side in both headlines are one name: "Donald Trump" or "Elon Musk" says
+ *   who as little as "Trump" does. A swap of opposites ("buys" / "sells",
+ *   "rises" / "falls") is never only wording, names or not. This misses some real pairs on purpose:
+ *   "Judge denies motion to dismiss Lindsay Clancy's murder case" / "Judge
+ *   Denies Request to Throw Out Lindsay Clancy's Murder Charges" stay apart,
+ *   because a plain rule cannot tell that swap from "tariffs" /
+ *   "immigration". A missed merge costs a second fact sheet; a wrong merge
+ *   never undoes itself.
  * Key words are the words left after dropping common words ("the", "says",
  * "after"...), lower-cased, with a plain plural "s" taken off.
  *
@@ -51,6 +71,7 @@ export const MIN_SHARED_TITLE = 2;
 export const MIN_SHARED_ALL = 3;
 export const MIN_OVERLAP = 0.25;
 export const MIN_TOPIC_WORDS = 3;
+export const TEMPLATE_SHARE = 0.5;
 /** Rows read per request: Supabase returns at most 1,000 rows at a time. */
 export const PAGE_ROWS = 1000;
 /** story_events lookups per request: the same limit, for the same reason, as ingest's story lookups. */
@@ -83,6 +104,17 @@ const GENERIC = new Set(`
 hear hearing argument case court ruling rule rules decision decide decides vote votes bill law order orders
 plan plans deal talk talks meeting meet calls call move moves sharply slightly big huge major report key
 `.split(/\s+/).filter(Boolean).map((w) => w.replace(/s$/, "")));
+
+/** Words whose swap for each other says the opposite happened (key-word form). */
+const OPPOSITES = [
+  ["rise", "fall"], ["rise", "drop"], ["rise", "sink"], ["gain", "fall"], ["gain", "drop"], ["gain", "lose"], ["jump", "fall"], ["jump", "drop"],
+  ["climb", "fall"], ["climb", "drop"], ["soar", "plunge"], ["surge", "plunge"], ["surge", "slump"], ["buy", "sell"], ["buy", "sold"], ["bought", "sell"],
+  ["bought", "sold"], ["win", "lose"], ["won", "lost"], ["beat", "lose"], ["hire", "fire"], ["hired", "fired"], ["open", "close"], ["opened", "closed"],
+  ["approve", "reject"], ["approved", "rejected"], ["pass", "fail"], ["passe", "fail"], ["passed", "failed"], ["raise", "cut"], ["raise", "lower"],
+  ["increase", "decrease"], ["up", "down"], ["higher", "lower"], ["ban", "allow"], ["sign", "veto"], ["join", "leave"], ["start", "end"],
+].map(([x, y]) => [x, y].map((w) => stem(w)));
+
+const opposite = (xs, ys) => OPPOSITES.some(([x, y]) => (xs.includes(x) && ys.includes(y)) || (xs.includes(y) && ys.includes(x)));
 
 /** A light stem so "votes" meets "vote" and "cities" meets "city". */
 function stem(word) {
@@ -137,7 +169,7 @@ export function profile(story) {
   const lower = lowerCaseWords(`${story.title || ""} ${story.snippet || ""}`);
   // Capitals that count as evidence of a name: the snippet always, the headline unless it is in Title Case.
   const capitals = capitalWords(`${isTitleCase(story.title) ? "" : story.title || ""} ${story.snippet || ""}`);
-  return { title, all, lower, capitals, at: Date.parse(story.published_at) };
+  return { title, words: [...title], all, lower, capitals, at: Date.parse(story.published_at) };
 }
 
 /**
@@ -146,16 +178,76 @@ export function profile(story) {
  * shared words besides it that say what happened.
  */
 export function sharedName(pa, pb) {
+  return headlineNames(pa, pb).proves;
+}
+
+/**
+ * The names the two headlines share. `proves`: a real name, or an
+ * institution plus MIN_TOPIC_WORDS words that say what happened.
+ * `different`: how many different real (non-institution) names they share,
+ * where name words side by side in both headlines ("Jensen Huang") are one.
+ */
+function headlineNames(pa, pb) {
   let institution = false;
   let topic = 0;
+  const names = [];
   for (const w of pa.title) {
     if (!pb.title.has(w)) continue;
     const isName = /^\p{L}/u.test(w) && !pa.lower.has(w) && !pb.lower.has(w) && (pa.capitals.has(w) || pb.capitals.has(w));
-    if (isName && !INSTITUTIONS.has(w)) return true;
-    if (isName) institution = true;
+    if (isName && !INSTITUTIONS.has(w)) names.push(w);
+    else if (isName) institution = true;
     else if (!GENERIC.has(w)) topic++;
   }
-  return institution && topic >= MIN_TOPIC_WORDS;
+  let different = 0;
+  const at = (p, w) => p.words.indexOf(w);
+  names.sort((x, y) => at(pa, x) - at(pa, y)).forEach((w, k) => {
+    const prev = names[k - 1];
+    const sideBySide = prev && at(pa, w) === at(pa, prev) + 1 && at(pb, w) === at(pb, prev) + 1;
+    if (!sideBySide) different++;
+  });
+  return { different, proves: names.length > 0 || (institution && topic >= MIN_TOPIC_WORDS) };
+}
+
+/** Index pairs [i, j] of the longest run of words the two lists share in the same order. */
+function inOrder(a, b) {
+  const len = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      len[i][j] = a[i] === b[j] ? len[i + 1][j + 1] + 1 : Math.max(len[i + 1][j], len[i][j + 1]);
+    }
+  }
+  const pairs = [];
+  for (let i = 0, j = 0; i < a.length && j < b.length;) {
+    if (a[i] === b[j]) { pairs.push([i, j]); i++; j++; }
+    else if (len[i + 1][j] >= len[i][j + 1]) i++;
+    else j++;
+  }
+  return pairs;
+}
+
+/**
+ * Are two headlines one pattern with a word swapped? (See THE RULE above.)
+ * True when they share at least TEMPLATE_SHARE of the longer headline's
+ * words in the same order, and somewhere between the same shared words (or
+ * before the first, or after the last) each has a word of its own that the
+ * other story, headline or snippet, never uses, and that says more than
+ * GENERIC filler. Two different shared names lift it (see above), except
+ * for a swap of OPPOSITES.
+ */
+export function swappedSlot(pa, pb) {
+  const pairs = inOrder(pa.words, pb.words);
+  if (pairs.length < TEMPLATE_SHARE * Math.max(pa.words.length, pb.words.length)) return false;
+  const lifted = headlineNames(pa, pb).different >= 2;
+  const own = (words, other) => words.filter((w) => !other.all.has(w) && !GENERIC.has(w));
+  const anchors = [[-1, -1], ...pairs, [pa.words.length, pb.words.length]];
+  for (let k = 1; k < anchors.length; k++) {
+    const [i0, j0] = anchors[k - 1];
+    const [i1, j1] = anchors[k];
+    const ownA = own(pa.words.slice(i0 + 1, i1), pb);
+    const ownB = own(pb.words.slice(j0 + 1, j1), pa);
+    if (ownA.length && ownB.length && (!lifted || opposite(ownA, ownB))) return true;
+  }
+  return false;
 }
 
 const sharedCount = (a, b) => { let n = 0; for (const w of a) if (b.has(w)) n++; return n; };
@@ -175,6 +267,7 @@ export function matchScore(a, b) {
   if (shared < MIN_SHARED_ALL) return 0;
   if (shared / Math.min(pa.all.size, pb.all.size) < MIN_OVERLAP) return 0;
   if (!sharedName(pa, pb)) return 0;
+  if (swappedSlot(pa, pb)) return 0;
   return shared;
 }
 

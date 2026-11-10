@@ -37,3 +37,26 @@ just one member, so a string of near matches could pull together stories
 that share nothing. Now a story has to match at least half of a group to join
 it. Both review cases and a chaining case are now permanent tests, and the
 same 12 real groups still form on today's live news.
+
+**Third round, after review.** Review found the real cause behind the first
+round's cases: a name that is in the news every day (Trump, Musk, Apple) says
+*who*, not *what happened*, just like "Supreme Court" did. "Trump signs
+executive order on tariffs" and "... on immigration" were grouped, and so were
+two Senate bills and two new Apple products. Instead of adding words to a list
+one at a time, the rule now spots the pattern itself. When two headlines are
+mostly the same words in the same order and each has swapped in a word of its
+own ("tariffs" / "immigration", "defense" / "farm"), that swapped word is what
+happened, so they are different events. Outlets covering one event in their own
+words rarely line up that closely. The one exception is when the headlines
+share two different names (France and Iran, Nvidia and Jensen Huang). That pins
+down the event twice over, so a swap there is only wording ("hacking" / "cyber
+attacks"). A full name like "Donald Trump" counts as one name, not two. Swapping
+opposites ("buys" / "sells", "rises" / "falls") always means different events.
+
+The cost, stated plainly: on today's news, 11 of the 12 real groups still form.
+The two Lindsay Clancy court stories ("motion to dismiss" / "request to throw
+out") are now kept apart, because a plain rule cannot tell that swap from
+"tariffs" / "immigration". Missing a match means a second fact sheet. A wrong
+match is permanent and would mix two different stories into one fact sheet, so
+missing is the safer mistake. The five review cases and six more of the same
+shape are now permanent tests.

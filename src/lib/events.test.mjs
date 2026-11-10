@@ -229,6 +229,61 @@ const LIVE_LOOKALIKES = [
     story("Stock Market Falls Sharply On Tariff Fears", "Stocks fell on tariff worries."),
     story("Stock Market Rises Sharply On Tariff Relief", "Stocks rose as tariff relief came."),
   ],
+  // Found by review (PP-4, round 2): a name in the news every day plus the same verbs, one word swapped.
+  [
+    story("Trump signs executive order on tariffs"),
+    story("Trump signs executive order on immigration"),
+  ],
+  [
+    story("Trump signs executive order on tariffs", "President Trump signed an executive order on Monday."),
+    story("Trump signs executive order on immigration", "President Trump signed an executive order on Monday."),
+  ],
+  [
+    story("Trump announces new tariffs on Canadian lumber"),
+    story("Trump announces new tariffs on Mexican steel"),
+  ],
+  [
+    story("Senate passes defense spending bill in late vote"),
+    story("Senate passes farm spending bill in late vote"),
+  ],
+  [
+    story("Apple unveils new iPhone at September event"),
+    story("Apple unveils new iPad at October event"),
+  ],
+  [
+    story("Tesla shares drop after Musk sells stock"),
+    story("Tesla shares drop after recall of Cybertruck"),
+  ],
+  // The same pattern, written for this rework, not seen by review. A full name says who as little as one name.
+  [
+    story("Donald Trump signs executive order on tariffs"),
+    story("Donald Trump signs executive order on immigration"),
+  ],
+  [
+    story("Elon Musk sells Tesla stock"),
+    story("Elon Musk sells SpaceX stock"),
+  ],
+  // Two different names (Musk, Tesla) do not lift a swap of opposites.
+  [
+    story("Elon Musk sells Tesla stock"),
+    story("Elon Musk buys Tesla stock"),
+  ],
+  [
+    story("Nvidia shares rise after Huang testifies"),
+    story("Nvidia shares fall after Huang testifies"),
+  ],
+  [
+    story("Biden pardons former aide in final days"),
+    story("Biden pardons former governor in final days"),
+  ],
+  [
+    story("Amazon cuts 14,000 jobs in cloud unit"),
+    story("Amazon cuts 14,000 jobs in retail unit"),
+  ],
+  [
+    story("Fed holds rates steady as inflation cools", "The Federal Reserve kept rates unchanged."),
+    story("Fed holds rates steady as hiring slows", "The Federal Reserve kept rates unchanged."),
+  ],
 ];
 
 test("stories on the same topic but not the same event stay apart (cases seen on the live feeds)", () => {
@@ -248,6 +303,27 @@ test("an institution in common still groups when the headlines also say what hap
     story("Supreme Court Allows Construction of Trump’s Border Wall in Big Bend", "The administration had asked the court to permit construction of a border wall in southwestern Texas."),
     story("Supreme Court says border wall construction can continue in west Texas", "The Trump administration filed an emergency request with the high court."),
   ));
+});
+
+test("a swapped wording is only wording when the headlines share two different names (seen on the live feeds)", () => {
+  assert.ok(sameEvent(
+    story("France accuses Iran of supermarket fridge hacking", "Tons of chilled and frozen food was spoiled last month as fridges and freezers in hundreds of supermarkets heated up."),
+    story("France accuses Iran of cyber 'sabotage' in fridge attacks", "France says Iranian military hackers took over refrigeration controllers at around 700 different retail sites last month."),
+  ));
+});
+
+test("a swapped wording keeps two headlines apart around one full name: a missed merge is the safe side", () => {
+  // Seen on the live feeds (2026-11-09): really one event, but the rule cannot tell this swap from "tariffs" / "immigration".
+  assert.equal(sameEvent(
+    story("Judge denies motion to dismiss Lindsay Clancy's murder case", "The ruling means the case can move forward, possibly with reduced charges in a new trial."),
+    story("Judge Denies Request to Throw Out Lindsay Clancy’s Murder Charges", "The judge also declined to investigate the lone juror who wanted to convict Ms. Clancy."),
+  ), false);
+});
+
+test("the same headline from two outlets, word for word, is one event", () => {
+  const t = "Man Utd expected to sack head coach Carrick";
+  const s = "Michael Carrick's Manchester United reign appears close to an end.";
+  assert.ok(sameEvent(story(t, s), story(t, s)));
 });
 
 test("Title Case is told apart from sentence case", () => {
