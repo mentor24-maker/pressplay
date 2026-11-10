@@ -87,15 +87,18 @@ create table if not exists ai_spend (
   purpose        text not null,                -- 'fact_sheet'
   event_key      text,
   story_set      text,
+  story_guids    text[],                       -- the stories sent; only a NEW story makes the event due again
   model          text not null,
   reserved_usd   numeric(10,6) not null,
   cost_usd       numeric(10,6),
   input_tokens   int,
   output_tokens  int,
-  -- booked | written | no_sheet | invalid | write_failed | api_error | over_cap
+  -- booked | written | no_sheet | invalid | kept_fuller | no_answer | write_failed | api_error | over_cap
   outcome        text not null default 'booked',
   created_at     timestamptz not null default now()
 );
+-- For a table made before story_guids was added (safe to run again).
+alter table ai_spend add column if not exists story_guids text[];
 create index if not exists ai_spend_month_idx on ai_spend (month);
 create index if not exists ai_spend_event_idx on ai_spend (event_key);
 

@@ -30,3 +30,17 @@ and the Anthropic key isn't set. Without the key, the step reports "not run"
 rather than failing quietly. Nineteen new automatic tests use a stand-in for
 Claude to cover the sheet, the split, the cap, bad answers, failed steps, and
 a check that article text never shows up in a log.
+
+**Fixes after review.** The reviewer found ways the step could waste the
+budget, and these are now closed. A slow answer could time out and then be
+retried every 20 minutes forever, paying each time with nothing to show. Now
+Claude's reply is streamed, piece by piece, so a long answer is not cut off.
+A call that still gets no answer is tried at most twice for the same stories.
+Each run also stops starting new calls once a whole call would no longer fit
+in Vercel's time limit, so a run is never killed mid-call. When an outlet's
+stored text expires after 30 days, the event is no longer sent again, and a
+fuller fact sheet is never replaced by a thinner one. Stories that belong
+together but not with the event are now moved out together, so they can get
+a sheet of their own. A too-large event no longer takes a run's slot. The
+address also refuses to run without its password, because it spends money.
+Twenty-six automatic tests now cover the step, seven more than before.

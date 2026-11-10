@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import Anthropic from "@anthropic-ai/sdk";
 import {
   writeFactSheets, eventsDue, readAnswer, spentThisMonth, costOf, worstCaseCost, reportLine, storySet, monthOf, buildPrompt,
-  MONTHLY_CAP_USD, MAX_INPUT_CHARS, MODEL, SCHEMA,
+  MONTHLY_CAP_USD, MAX_INPUT_CHARS, MODEL, SCHEMA, MAX_UNFINISHED_TRIES, CALL_LIMIT_MS, RUN_BUDGET_MS,
 } from "./factSheets.js";
 
 const NOW = Date.parse("2026-11-09T18:00:00Z");
@@ -99,20 +99,43 @@ const GOOD = {
   disagreements: [{ about: "When the vote happened", accounts: [{ claim: "Late Monday", sources: ["S2"] }, { claim: "Early Tuesday", sources: ["S1"] }] }],
 };
 
-/** A stand-in for the Anthropic client: answers with `answer`, counts and keeps each request. */
-function fakeClaude(answer = GOOD, { usage = { input_tokens: 5000, output_tokens: 2000 }, stop = "end_turn", throws = null } = {}) {
+/**
+ * A stand-in for the Anthropic client's streamed call: answers with `answer`,
+ * counts and keeps each request and its signal. `hang` never answers until
+ * the call's signal stops it, like a reply that takes too long.
+ */
+function fakeClaude(answer = GOOD, { usage = { input_tokens: 5000, output_tokens: 2000 }, stop = "end_turn", throws = null, hang = false } = {}) {
   const requests = [];
+  const signals = [];
   return {
     requests,
+    signals,
     messages: {
-      create: async (params) => {
+      stream: (params, opts = {}) => {
         requests.push(params);
-        if (throws) throw throws;
-        const a = typeof answer === "function" ? answer(params) : answer;
-        return { stop_reason: stop, usage, content: [{ type: "text", text: typeof a === "string" ? a : JSON.stringify(a) }] };
+        signals.push(opts.signal);
+        return {
+          finalMessage: async () => {
+            // A real call holds a connection open; the stand-in holds a timer, so the test waits for the signal.
+            if (hang) {
+              const hold = setInterval(() => {}, 1000);
+              await new Promise((_, no) => opts.signal.addEventListener("abort", () => { clearInterval(hold); no(new Anthropic.APIUserAbortError()); }, { once: true }));
+            }
+            if (throws) throw throws;
+            const a = typeof answer === "function" ? answer(params) : answer;
+            return { stop_reason: stop, usage, content: [{ type: "text", text: typeof a === "string" ? a : JSON.stringify(a) }] };
+          },
+        };
       },
     },
   };
+}
+
+/** Add a story, with its full copy, to an event in a fake database. */
+function addStory(db, s, eventKey = "a") {
+  db.t.stories.push(s);
+  db.t.story_bodies.push({ story_guid: s.guid, source: s.source, body: `${BODY_SECRET} ${s.title}`, method: "feed", fetched_at: s.published_at });
+  db.t.story_events.push({ story_guid: s.guid, event_key: eventKey, linked_by: "rule" });
 }
 
 test("an event with three outlets gets a fact sheet whose every fact names its outlets, with the disagreements", async () => {
@@ -134,6 +157,7 @@ test("an event with three outlets gets a fact sheet whose every fact names its o
   // The request: the right model, the JSON schema, every outlet's full copy.
   const [req] = claude.requests;
   assert.equal(req.model, MODEL);
+  assert.ok(claude.signals[0] instanceof AbortSignal, "the streamed call carries its time limit");
   assert.deepEqual(req.output_config.format, { type: "json_schema", schema: SCHEMA });
   for (const s of ["NPR", "BBC", "AP"]) assert.ok(req.messages[0].content.includes(`Outlet: ${s}`));
   assert.ok(req.messages[0].content.includes(BODY_SECRET));
@@ -188,7 +212,7 @@ test("the check splits off a story about a different event, and the sheet is wri
     const ids = [...params.messages[0].content.matchAll(/<article id="(S\d+)">\nOutlet: (\w+)/g)];
     const cnn = ids.find(([, , o]) => o === "CNN")[1];
     const rest = ids.filter(([, id]) => id !== cnn).map(([, id]) => id);
-    return { ...GOOD, belongs: rest, outsiders: [{ id: cnn, reason: "a football game" }], facts: [{ fact: "The council approved a budget.", sources: rest }], disagreements: [] };
+    return { ...GOOD, belongs: rest, outsiders: [{ ids: [cnn], reason: "a football game" }], facts: [{ fact: "The council approved a budget.", sources: rest }], disagreements: [] };
   };
   const r = await writeFactSheets(db, { client: fakeClaude(answer), now: NOW });
   assert.equal(r.failed, null, r.errors.join("; "));
@@ -208,7 +232,7 @@ test("when the check leaves only one outlet, no sheet is written and the event i
   const s = seed();
   s.stories = s.stories.slice(0, 2); s.story_bodies = s.story_bodies.slice(0, 2); s.story_events = s.story_events.slice(0, 2);
   const db = fakeDb(s);
-  const claude = fakeClaude({ ...GOOD, belongs: ["S1"], outsiders: [{ id: "S2", reason: "different" }], facts: [], disagreements: [] });
+  const claude = fakeClaude({ ...GOOD, belongs: ["S1"], outsiders: [{ ids: ["S2"], reason: "different" }], facts: [], disagreements: [] });
   const r = await writeFactSheets(db, { client: claude, now: NOW });
   assert.equal(r.failed, null, r.errors.join("; "));
   assert.equal(r.noSheet, 1);
@@ -274,7 +298,8 @@ test("an answer that names a story outside the event, or misses one, is refused 
   const cases = [
     { ...GOOD, facts: [{ fact: "x", sources: ["S9"] }] },
     { ...GOOD, belongs: ["S1", "S2"] },
-    { ...GOOD, belongs: ["S1", "S2", "S3"], outsiders: [{ id: "S3", reason: "" }] },
+    { ...GOOD, belongs: ["S1", "S2", "S3"], outsiders: [{ ids: ["S3"], reason: "" }] },
+    { ...GOOD, belongs: ["S1", "S2"], outsiders: [{ ids: [], reason: "" }, { ids: ["S3"], reason: "" }] },
     { ...GOOD, facts: [{ fact: "x", sources: [] }] },
     { ...GOOD, facts: [] },
     "not json",
@@ -309,7 +334,8 @@ test("an API error is not charged and is tried again; a lost connection keeps it
 
   const db2 = fakeDb(seed());
   await writeFactSheets(db2, { client: fakeClaude(GOOD, { throws: new Error("socket hang up") }), now: NOW });
-  assert.equal(db2.t.ai_spend[0].outcome, "booked");
+  assert.equal(db2.t.ai_spend[0].outcome, "no_answer");
+  assert.equal(db2.t.ai_spend[0].cost_usd, undefined, "no real cost is known, so the worst case counts");
   assert.equal(await spentThisMonth(db2, NOW), db2.t.ai_spend[0].reserved_usd);
 });
 
@@ -320,13 +346,135 @@ test("without an API key or a database, the step does not run and says why", asy
   assert.equal(noDb.off, "no database (dry run)");
 });
 
-test("an event with too much text is skipped, never cut short", async () => {
+test("an event with too much text is skipped, never cut short, and does not take a run's slot", async () => {
   const s = seed();
   s.story_bodies[0].body = "x".repeat(MAX_INPUT_CHARS);
   const claude = fakeClaude();
   const r = await writeFactSheets(fakeDb(s), { client: claude, now: NOW });
   assert.equal(claude.requests.length, 0);
   assert.equal(r.skipped.length, 1);
+
+  // The big event is the newest, yet the one slot goes to the event that fits.
+  const db = fakeDb(seed());
+  db.t.story_bodies[0].fetched_at = new Date(NOW).toISOString();
+  db.t.story_bodies[0].body = "x".repeat(MAX_INPUT_CHARS);
+  const more = [story("p", "NPR", "Storm hits coast", 5), story("q", "BBC", "Storm batters coast", 5)];
+  db.t.events.push({ key: "p", first_published_at: more[0].published_at });
+  more.forEach((m) => addStory(db, m, "p"));
+  const storm = fakeClaude({ ...GOOD, belongs: ["S1", "S2"], facts: [{ fact: "A storm hit.", sources: ["S1", "S2"] }], disagreements: [] });
+  const r2 = await writeFactSheets(db, { client: storm, now: NOW, maxEvents: 1 });
+  assert.equal(r2.skipped.length, 1);
+  assert.equal(r2.written, 1);
+  assert.equal(db.t.fact_sheets[0].event_key, "p");
+});
+
+test("a reply that takes too long is stopped at the call's limit, counts at its worst case, and is tried at most twice", async () => {
+  const db = fakeDb(seed());
+  const slow = fakeClaude(GOOD, { hang: true });
+  for (let run = 0; run < MAX_UNFINISHED_TRIES + 2; run++) {
+    const r = await writeFactSheets(db, { client: slow, now: NOW, callLimitMs: 20 });
+    if (run < MAX_UNFINISHED_TRIES) assert.equal(r.failed, "ask Claude");
+    else assert.equal(r.due, 0, "it waits for a new story instead of paying again");
+  }
+  assert.equal(slow.requests.length, MAX_UNFINISHED_TRIES);
+  assert.ok(db.t.ai_spend.every((b) => b.outcome === "no_answer" && b.cost_usd === undefined));
+  assert.equal(await spentThisMonth(db, NOW), db.t.ai_spend.reduce((n, b) => n + b.reserved_usd, 0));
+
+  // A new story joining the event makes it worth one more try.
+  addStory(db, story("d", "Reuters", "Denver passes budget", 0.5));
+  assert.deepEqual((await eventsDue(db)).map((e) => e.key), ["a"]);
+});
+
+test("a sheet that could not be stored is not paid for again and again", async () => {
+  const db = fakeDb(seed(), { fail: { "fact_sheets:upsert": true } });
+  const claude = fakeClaude();
+  for (let run = 0; run < MAX_UNFINISHED_TRIES + 2; run++) await writeFactSheets(db, { client: claude, now: NOW });
+  assert.equal(claude.requests.length, MAX_UNFINISHED_TRIES);
+});
+
+test("a new call starts only if a whole one still fits in the run, so the run is never cut off mid-call", async () => {
+  assert.ok(RUN_BUDGET_MS < 300_000 && CALL_LIMIT_MS <= RUN_BUDGET_MS, "inside the route's maxDuration");
+  const s = seed();
+  const more = [story("p", "NPR", "Storm hits coast", 1), story("q", "BBC", "Storm batters coast", 1)];
+  s.events.push({ key: "p", first_published_at: more[0].published_at });
+  const db = fakeDb(s);
+  more.forEach((m) => addStory(db, m, "p"));
+  let t = 0;
+  const clock = () => t;
+  const claude = fakeClaude((p) => {
+    t += 100_000; // each call takes 100 s
+    return p.messages[0].content.includes("Storm")
+      ? { ...GOOD, belongs: ["S1", "S2"], facts: [{ fact: "A storm hit.", sources: ["S1", "S2"] }], disagreements: [] }
+      : GOOD;
+  });
+  const r = await writeFactSheets(db, { client: claude, now: NOW, clock, budgetMs: 270_000, callLimitMs: 200_000 });
+  assert.equal(claude.requests.length, 1, "after 100 s, a 200 s call no longer fits in 270 s");
+  assert.equal(r.written, 1);
+  assert.equal(r.outOfTime, 1);
+  assert.match(reportLine(r), /1 left for the next run \(out of time\)/);
+  assert.equal((await eventsDue(db)).length, 1, "the next run takes it");
+});
+
+test("copy expiring is not a change: the event is not sent again and its sheet is kept", async () => {
+  const db = fakeDb(seed());
+  const claude = fakeClaude();
+  await writeFactSheets(db, { client: claude, now: NOW });
+  db.t.story_bodies = db.t.story_bodies.filter((b) => b.story_guid !== "c"); // AP's copy is deleted after 30 days
+  assert.deepEqual(await eventsDue(db), []);
+  await writeFactSheets(db, { client: claude, now: NOW });
+  assert.equal(claude.requests.length, 1);
+  assert.deepEqual(db.t.fact_sheets[0].story_guids, ["a", "b", "c"]);
+
+  // Two stories gone and one new: still fewer than the sheet has, so not sent.
+  db.t.story_bodies = db.t.story_bodies.filter((b) => b.story_guid !== "b");
+  addStory(db, story("d", "Reuters", "Denver passes budget", 0.5));
+  assert.deepEqual(await eventsDue(db), []);
+  // Another new story: as many as the sheet, with new ones in it, so it is due.
+  addStory(db, story("e", "CNN", "Denver budget passes", 0.4));
+  assert.deepEqual((await eventsDue(db)).map((e) => e.key), ["a"]);
+});
+
+test("a sheet is never replaced by one written from fewer stories", async () => {
+  const db = fakeDb(seed());
+  await writeFactSheets(db, { client: fakeClaude(), now: NOW });
+  db.t.story_bodies = db.t.story_bodies.filter((b) => b.story_guid !== "a"); // NPR's copy expired
+  addStory(db, story("d", "Reuters", "Putin to host Xi", 0.5));
+  addStory(db, story("e", "CNN", "Xi to visit Moscow", 0.4));
+  // The check says the two new ones are a different event: the new sheet would have two stories, the old has three.
+  const r = await writeFactSheets(db, { client: fakeClaude({ ...GOOD, belongs: ["S1", "S2"], outsiders: [{ ids: ["S3", "S4"], reason: "other" }], facts: [{ fact: "x", sources: ["S1", "S2"] }], disagreements: [] }), now: NOW });
+  assert.equal(r.failed, null, r.errors.join("; "));
+  assert.equal(r.keptFuller, 1);
+  assert.equal(r.written, 0);
+  assert.deepEqual(db.t.fact_sheets[0].story_guids, ["a", "b", "c"]);
+  assert.equal(db.t.ai_spend.at(-1).outcome, "kept_fuller");
+  assert.match(reportLine(r), /kept the fuller sheet/);
+});
+
+test("old sheet stories the check moves to another event do not count for the old sheet", async () => {
+  const db = fakeDb(seed());
+  await writeFactSheets(db, { client: fakeClaude(), now: NOW });
+  addStory(db, story("d", "Reuters", "Denver passes budget", 0.5));
+  // Now the check says AP's story (in the old sheet) and the new one are a different event.
+  const r = await writeFactSheets(db, { client: fakeClaude({ ...GOOD, belongs: ["S1", "S2"], outsiders: [{ ids: ["S3", "S4"], reason: "other" }], facts: [{ fact: "x", sources: ["S1", "S2"] }], disagreements: [] }), now: NOW });
+  assert.equal(r.failed, null, r.errors.join("; "));
+  assert.equal(r.written, 1, "the old sheet held a story that is not this event");
+  assert.deepEqual(db.t.fact_sheets.find((f) => f.event_key === "a").story_guids, ["a", "b"]);
+});
+
+test("outsiders that report the same other event are moved together into one event", async () => {
+  const db = fakeDb(seed({ extra: [story("y", "CNN", "Putin to host Xi", 1), story("z", "Fox", "Xi to visit Moscow", 1)] }));
+  const answer = (params) => {
+    const ids = Object.fromEntries([...params.messages[0].content.matchAll(/<article id="(S\d+)">\nOutlet: (\w+)/g)].map(([, id, o]) => [o, id]));
+    return { ...GOOD, belongs: [ids.NPR, ids.BBC, ids.AP], outsiders: [{ ids: [ids.CNN, ids.Fox], reason: "a visit, not sanctions" }], facts: [{ fact: "x", sources: [ids.NPR, ids.BBC] }], disagreements: [] };
+  };
+  const r = await writeFactSheets(db, { client: fakeClaude(answer), now: NOW });
+  assert.equal(r.failed, null, r.errors.join("; "));
+  assert.equal(r.split, 2);
+  const keyOf = (g) => db.t.story_events.find((l) => l.story_guid === g).event_key;
+  assert.equal(keyOf("y"), keyOf("z"), "together");
+  assert.match(keyOf("y"), /^split:/);
+  // That event has two outlets, so it is due a sheet of its own.
+  assert.deepEqual((await eventsDue(db)).map((e) => e.key), [keyOf("y")]);
 });
 
 test("a failed database step says so", async () => {

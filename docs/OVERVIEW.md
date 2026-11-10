@@ -154,8 +154,9 @@ only lists what is waiting and calls nothing). It looks for events whose
 stories have full copy from two or more outlets and sends up to three of them
 to **Claude**, Anthropic's AI (model `claude-opus-5-5`), with
 `src/lib/factSheets.js`. For each event Claude first says whether every story
-really reports the same event; any that does not is split off into an event
-of its own. From the rest it writes a neutral fact sheet: each fact with the
+really reports the same event; any that do not are split off, and stories
+that report the same other event are moved together into one new event. From
+the rest it writes a neutral fact sheet: each fact with the
 outlets that report it, plus every point where the outlets disagree. The
 sheet goes in the private `fact_sheets` table. Stories with no full copy are
 left out, so nothing is written until an outlet's full copy is switched on.
@@ -163,7 +164,16 @@ left out, so nothing is written until an outlet's full copy is switched on.
 **Spending stops at $50 a month.** Every call is booked in the private
 `ai_spend` table before it is made, at the most it could cost, and the step
 stops, saying so, when the month (UTC) would pass $50. A typical sheet costs
-around ten cents. An event is sent again only when new stories have joined it.
+around ten cents. An event is sent again only when a new story has joined
+it: a story whose copy expires after 30 days is not a change, and a stored
+sheet is never replaced by one written from fewer stories. A call that gets
+no answer (too slow, connection lost) counts at its most-it-could-cost
+figure and is tried at most twice for the same stories, then the event waits
+for a new story. Claude's reply is streamed (sent piece by piece as it is
+written), each call is stopped after 200 seconds, and a new call starts only
+if a whole one still fits in the run's 270 seconds, so Vercel's 300-second
+limit never cuts a run off mid-call. Because the address spends money, it
+refuses to run at all when `CRON_SECRET` is not set.
 Without `ANTHROPIC_API_KEY` the step does not run and says so.
 
 ---
