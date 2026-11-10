@@ -21,7 +21,7 @@ export const USER_AGENT = "PressPlayToday/0.1 (+https://pressplay.today; feed re
 export const ROBOTS_TOKEN = "pressplaytoday";
 export const RETENTION_DAYS = 30;
 export const METHODS = ["feed", "page"];
-/** Pages STORED per feed per run, so one run stays well inside the 60-second cron limit. */
+/** Pages STORED per feed per run. This alone does not keep a run inside the 60-second cron limit (see "Not safe to switch on yet" in docs/OVERVIEW.md). */
 export const MAX_PAGES_PER_FEED = 15;
 /**
  * Page requests per feed per run, stored or not. A link that fails (HTTP
