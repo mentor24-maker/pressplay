@@ -30,6 +30,14 @@ function fullCopyLines(feedList, fc, writing) {
   return lines.join("\n");
 }
 
+/** Fresh stories per category, every defined category shown (0 when a category got none). */
+const CATEGORIES = ["top", "pol", "biz", "tec", "spt", "ent", "sci", "loc", "str"];
+function categoryLine(rowList) {
+  const n = Object.fromEntries(CATEGORIES.map((c) => [c, 0]));
+  for (const r of rowList) n[r.category] = (n[r.category] ?? 0) + 1;
+  return `By category: ${Object.entries(n).map(([c, k]) => `${c} ${k}`).join(", ")}`;
+}
+
 const args = new Set(process.argv.slice(2));
 const feeds = JSON.parse(readFileSync(new URL("../data/feeds.json", import.meta.url))).feeds;
 
@@ -61,6 +69,7 @@ if (supabase) {
   ev.errors.forEach((e) => console.log("  ×", e));
 } else {
   const ev = countEvents(rows);
+  console.log(categoryLine(rows));
   console.log(`Events (dry run, nothing stored): these ${ev.stories} stories make ${ev.events} event(s), ${ev.multiSource} of them with more than one story.`);
   console.log("(dry run — nothing written). Top 10 by attention:\n");
   rows.sort((a, b) => b.attention - a.attention).slice(0, 10)
