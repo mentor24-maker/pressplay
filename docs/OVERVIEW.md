@@ -26,7 +26,7 @@ Most news sites publish an **RSS feed**: a machine-readable list of their
 latest headlines, each with a short summary, a date and a link. PressPlay
 reads those feeds instead of the websites themselves.
 
-The list of feeds lives in one file, `data/feeds.json`. It holds **11 feeds**
+The list of feeds lives in one file, `data/feeds.json`. It holds **12 feeds**
 today, each tagged with a **category** (a short code such as `top` or `tec`):
 
 | Feed | Category |
@@ -42,14 +42,20 @@ today, each tagged with a **category** (a short code such as `top` or `tec`):
 | ScienceDaily | Science |
 | The Denver Post | Local |
 | BBC News Politics | Politics |
+| UPI Odd News | Strange but True |
 
 Nine categories are defined (Top Story, Politics, Business, Technology,
-Sports, Entertainment, Science, Local, Strange but True); Strange but True has
-no feed yet. BBC News Politics was added after reading BBC's feeds page, which
+Sports, Entertainment, Science, Local, Strange but True), and every one of
+them now has at least one feed. BBC News Politics was added after reading BBC's feeds page, which
 says: "We encourage the use of BBC News feeds as part of a website, however,
 we do require that the proper format and attribution is used when BBC News
-content appears." Its stories are credited "BBC News Politics", with no BBC logo. Adding or removing a feed is just an edit to that
-file. The file itself carries a reminder to check each publisher's RSS terms
+content appears." Its stories are credited "BBC News Politics", with no BBC logo. UPI Odd News was
+added after Dane read UPI's Terms of Use himself (UPI's site turns away
+automated readers, so a machine could not) and approved showing its
+headlines, snippets and links. UPI posts odd news on weekdays only, so from
+Sunday afternoon to Monday late morning (Eastern time) its newest story is
+older than the 48-hour cut-off and Strange but True shows 0. Adding or
+removing a feed is just an edit to that file. The file itself carries a reminder to check each publisher's RSS terms
 of use before going live.
 
 ### What happens to each story ("ingestion")
@@ -89,7 +95,7 @@ story, to build neutral fact lists from all sources later. It is never shown
 anywhere. The rules, in `src/lib/fullCopy.js`:
 
 - **Only for outlets that said yes.** Each feed in `data/feeds.json` has a
-  `fullCopy` setting. `allowed` is **off** for all eleven feeds today; it is
+  `fullCopy` setting. `allowed` is **off** for all twelve feeds today; it is
   turned on for an outlet once that outlet agrees.
 - **Two ways to get it**, chosen per feed by `method`: `"feed"` reads the full
   text the feed itself carries in its `content:encoded` field (some publishers
@@ -108,7 +114,7 @@ anywhere. The rules, in `src/lib/fullCopy.js`:
   public `stories` table. Text shorter than 200 characters is a teaser, not
   the article, and is not stored.
 - **Never in a log.** Errors name the feed and the link, never the text; the
-  run reports only counts ("Full copy: off for all 11 feeds").
+  run reports only counts ("Full copy: off for all 12 feeds").
 - **Kept 30 days**, then deleted on the next run.
 - **Not safe to switch on yet.** The PP-3 review (9 November 2026) found
   these must be fixed before any outlet's `allowed` is turned on:
@@ -132,8 +138,8 @@ shortcuts:
 
 | Command | What it does |
 |---|---|
-| `npm run ingest` | Fetches all 11 feeds and saves the results to the database. If the database settings are missing, it says so and falls back to a dry run. |
-| `npm run ingest:dry` | Fetches all 11 feeds, prints how many fresh stories each category got (`By category: top 49, pol 17, …`) and the top 10 by attention score, **writes nothing**. |
+| `npm run ingest` | Fetches all 12 feeds and saves the results to the database. If the database settings are missing, it says so and falls back to a dry run. |
+| `npm run ingest:dry` | Fetches all 12 feeds, prints how many fresh stories each category got (`By category: top 49, pol 17, …`) and the top 10 by attention score, **writes nothing**. |
 | `npm run ingest:local` | Needs no internet: reads a sample feed file kept in the repository (`scripts/sample/sample-feed.xml`) and prints what it found. Writes nothing. |
 
 All three read the settings file `.env.local` if one exists (see section 5).

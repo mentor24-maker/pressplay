@@ -12,6 +12,7 @@
     { "name": "Variety",              "url": "https://variety.com/feed/",                                       "category": "ent", "fullCopy": { "allowed": false, "method": "page" } },
     { "name": "ScienceDaily",         "url": "https://www.sciencedaily.com/rss/all.xml",                        "category": "sci", "fullCopy": { "allowed": false, "method": "page" } },
     { "name": "The Denver Post",      "url": "https://www.denverpost.com/feed/",                                "category": "loc", "fullCopy": { "allowed": false, "method": "page" } },
-    { "name": "BBC News Politics",    "url": "https://feeds.bbci.co.uk/news/politics/rss.xml",                  "category": "pol", "fullCopy": { "allowed": false, "method": "page" } }
+    { "name": "BBC News Politics",    "url": "https://feeds.bbci.co.uk/news/politics/rss.xml",                  "category": "pol", "fullCopy": { "allowed": false, "method": "page" } },
+    { "name": "UPI Odd News",         "url": "https://rss.upi.com/news/odd_news.rss",                           "category": "str", "fullCopy": { "allowed": false, "method": "page" } }
   ]
 }

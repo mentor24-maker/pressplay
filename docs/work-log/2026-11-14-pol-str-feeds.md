@@ -9,7 +9,10 @@ credited. The practice run (`npm run ingest:dry`) also prints a count of fresh
 stories per section, so an empty section now shows as a 0 instead of going
 unnoticed.
 
-Strange but True is still empty. Every strange-news source we checked was too
+Strange but True was harder. Every strange-news source we checked was too
 quiet, limited to personal use, or had terms we couldn't read. Which one to use
-is a legal call, so it went to Dane. The new count also exposed a separate
+is a legal call, so it went to Dane. He read UPI's terms and said "UPI ok", so
+Strange but True now draws on UPI Odd News. UPI posts odd news on weekdays
+only, so the section is empty from Sunday afternoon until Monday's first
+stories. The new count also exposed a separate
 problem: The Denver Post is refusing our reader, so Local is empty too.
